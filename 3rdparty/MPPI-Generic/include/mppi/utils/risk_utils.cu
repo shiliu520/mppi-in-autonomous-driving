@@ -8,7 +8,7 @@
 namespace mppi
 {
 template <class T = float>
-__host__ __device__ void insertionSort(T* __restrict__ array, const int N)
+__host__ __device__ inline void insertionSort(T* __restrict__ array, const int N)
 {
   T temp;
   int j;
@@ -25,7 +25,8 @@ __host__ __device__ void insertionSort(T* __restrict__ array, const int N)
   }
 }
 
-__host__ __device__ float RiskMeasure::var(float* __restrict__ costs, const int num_costs, float alpha)
+__host__ __device__ inline float RiskMeasure::var(float* __restrict__ costs, const int num_costs,
+                                                  float alpha)
 {
   float cost = 0.0f;
 #ifdef __CUDA_ARCH__
@@ -42,7 +43,8 @@ __host__ __device__ float RiskMeasure::var(float* __restrict__ costs, const int 
   return cost;
 }
 
-__host__ __device__ float RiskMeasure::cvar(float* __restrict__ costs, const int num_costs, float alpha)
+__host__ __device__ inline float RiskMeasure::cvar(float* __restrict__ costs, const int num_costs,
+                                                   float alpha)
 {
   float cost = 0.0f;
   float value_at_risk = var(costs, num_costs, alpha);  // also sorts costs

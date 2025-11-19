@@ -110,46 +110,6 @@ if(CMAKE_EXPORT_COMPILE_COMMANDS)
 endif()
 
 
-if (ENV_MODEL_BUILD_PYTHON_BINDINGS)
-    if(SKBUILD)
-        find_package(Python 3.8 COMPONENTS Interpreter Development.Module REQUIRED)
-
-        if (NOT NB_DIR)
-            execute_process(
-                    COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
-                    OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE NB_DIR)
-        endif ()
-        list(APPEND CMAKE_PREFIX_PATH "${NB_DIR}")
-        find_package(nanobind CONFIG REQUIRED)
-
-        # SKBUILD_SELF_CONTAINED controls whether we try to build all dependencies
-        # ourselves. This is used in order to build cross-platform wheels
-        # using cibuildwheel.
-        # We don't enable this in normal Python builds since it will generally
-        # just slow down the build.
-        set(SKBUILD_SELF_CONTAINED OFF)
-
-        if(DEFINED ENV{CIBUILDWHEEL})
-            set(SKBUILD_SELF_CONTAINED ON)
-        endif()
-
-        message(STATUS "PYTHON MODE - assuming we are invoked by pip/setup.py")
-        message(STATUS "PYTHON MODE - building static libraries")
-
-        set(FETCHCONTENT_QUIET ON)
-
-        # Globally build static libraries (affects all calls to add_library
-        # without an explicit library type)
-        set(BUILD_SHARED_LIBS OFF)
-
-        set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
-        # Globally set visibility preset
-        set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-        set(CMAKE_CXX_VISIBILITY_PRESET default)
-    endif()
-endif()
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -242,15 +202,15 @@ cmake_dependent_option(ENV_MODEL_BUILD_CODE_COVERAGE
 # NOTE: Depends on Boost::program_options, but we already handle the case where
 # Boost::program_options is not found below with an explicit warning for the user,
 # so no need to restrict ENV_MODEL_BUILD_EXECUTABLE further here.
-cmake_dependent_option(ENV_MODEL_BUILD_EXECUTABLE
-    "Build executable"
-    ${ENV_MODEL_BUILD_EXTRAS_DEFAULT}
-    "NOT SKBUILD"
-    OFF)
+# cmake_dependent_option(ENV_MODEL_BUILD_EXECUTABLE
+#     "Build executable"
+#     ${ENV_MODEL_BUILD_EXTRAS_DEFAULT}
+#     "NOT SKBUILD"
+#     OFF)
 
-option(ENV_MODEL_BUILD_PYTHON_BINDINGS
-        "Build Python bindings"
-        ${ENV_MODEL_BUILD_EXTRAS_DEFAULT})
+# option(ENV_MODEL_BUILD_PYTHON_BINDINGS
+#         "Build Python bindings"
+#         ${ENV_MODEL_BUILD_EXTRAS_DEFAULT})
 
 set(CMAKE_SUPPORTS_TRY_FIND_PACKAGE OFF)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24.0)
@@ -341,22 +301,22 @@ if(ENV_MODEL_SYSTEM_PACKAGES_FORCE)
     find_package(pugixml 1.11 REQUIRED)
     find_package(spdlog 1.8.0 REQUIRED)
     # find_package(GTest)
-    find_package(yaml-cpp 0.6.0 REQUIRED)
+    # find_package(yaml-cpp 0.6.0 REQUIRED)
     find_package(range-v3 0.12.0 REQUIRED)
 
     # yaml-cpp::yaml-cpp is not present in installed config file as of version 0.7.0
-    if(NOT TARGET yaml-cpp::yaml-cpp)
-        add_library(yaml-cpp::yaml-cpp ALIAS yaml-cpp)
-    endif()
+    # if(NOT TARGET yaml-cpp::yaml-cpp)
+    #     add_library(yaml-cpp::yaml-cpp ALIAS yaml-cpp)
+    # endif()
 else()
     # Normal path: We try to use find_package via FetchContent, otherwise we fall
     # back to normal FetchContent
 
-    include(external/ExternalEigen)
+    # include(external/ExternalEigen)
     include(external/ExternalPugixml)
-    include(external/ExternalSpdlog)
-    include(external/ExternalGoogleTest)
-    include(external/ExternalYamlCpp)
+    # include(external/ExternalSpdlog)
+    # include(external/ExternalGoogleTest)
+    # include(external/ExternalYamlCpp)
     include(external/ExternalRange)
 endif()
 
@@ -369,15 +329,15 @@ add_subdirectory(include/commonroad_cpp/interfaces/commonroad/protobufFormat)
 # Add Environment model node
 add_subdirectory(src)
 
-if(ENV_MODEL_BUILD_EXECUTABLE)
-    if(TARGET Boost::program_options AND TARGET OpenMP::OpenMP_CXX)
-        add_subdirectory(example)
-    elseif(NOT TARGET Boost::program_options)
-        message(WARNING "disabling example because Boost::program_options was not found")
-    elseif(NOT TARGET OpenMP::OpenMP_CXX)
-        message(WARNING "disabling example because OpenMP was not found")
-    endif()
-endif()
+# if(ENV_MODEL_BUILD_EXECUTABLE)
+#     if(TARGET Boost::program_options AND TARGET OpenMP::OpenMP_CXX)
+#         add_subdirectory(example)
+#     elseif(NOT TARGET Boost::program_options)
+#         message(WARNING "disabling example because Boost::program_options was not found")
+#     elseif(NOT TARGET OpenMP::OpenMP_CXX)
+#         message(WARNING "disabling example because OpenMP was not found")
+#     endif()
+# endif()
 
 ## Doxygen
 if(ENV_MODEL_BUILD_DOXYGEN)
@@ -385,16 +345,16 @@ if(ENV_MODEL_BUILD_DOXYGEN)
 endif()
 
 # add unit testing
-if(ENV_MODEL_BUILD_TESTS)
-    if(TARGET Boost::filesystem AND TARGET OpenMP::OpenMP_CXX)
-        enable_testing()
-        add_subdirectory(tests)
-    elseif(NOT TARGET Boost::filesystem)
-        message(WARNING "disabling tests because Boost::program_options was not found")
-    elseif(NOT TARGET OpenMP::OpenMP_CXX)
-        message(WARNING "disabling tests because OpenMP was not found")
-    endif()
-endif()
+# if(ENV_MODEL_BUILD_TESTS)
+#     if(TARGET Boost::filesystem AND TARGET OpenMP::OpenMP_CXX)
+#         enable_testing()
+#         add_subdirectory(tests)
+#     elseif(NOT TARGET Boost::filesystem)
+#         message(WARNING "disabling tests because Boost::program_options was not found")
+#     elseif(NOT TARGET OpenMP::OpenMP_CXX)
+#         message(WARNING "disabling tests because OpenMP was not found")
+#     endif()
+# endif()
 
 include(cmake/install.cmake)
 
