@@ -4,6 +4,7 @@ project(ContingencyPlanning LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Release" CACHE STRING "Build type" FORCE)
@@ -45,6 +46,7 @@ file(GLOB PLANNING_SOURCES CONFIGURE_DEPENDS
 )
 
 include_directories(${FOXGLOVE_SOURCE_DIR}/include)
+include_directories(${PROJECT_SOURCE_DIR}/3rdparty/environment-model/include/)
 
 # Simulator library
 add_library(simulator SHARED ${SIMULATOR_SOURCES})
@@ -53,6 +55,10 @@ target_include_directories(simulator
     PUBLIC
         ${PROJECT_SOURCE_DIR}
         ${FOXGLOVE_SOURCE_DIR}/include
+)
+target_link_libraries(simulator
+    PUBLIC
+        EnvironmentModel::env_model
 )
 
 add_library(planning SHARED ${PLANNING_SOURCES})

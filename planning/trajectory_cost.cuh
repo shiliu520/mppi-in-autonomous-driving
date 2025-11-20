@@ -1,3 +1,11 @@
+/*
+ * @Author: puyu yu.pu@qq.com
+ * @Date: 2025-11-17 23:30:11
+ * @LastEditTime: 2025-11-20 23:10:35
+ * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
+ * Copyright (c) 2025 by puyu, All Rights Reserved.
+ */
+
 #pragma once
 
 #include <cmath>

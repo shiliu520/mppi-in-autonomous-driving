@@ -1,8 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditors: puyu yu.pu@qq.com
- * @LastEditTime: 2025-11-18 23:51:39
+ * @LastEditTime: 2025-11-20 23:11:22
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -10,6 +9,9 @@
 #pragma once
 
 #include "common/common.hpp"
+#include "commonroad_cpp/interfaces/commonroad/input_utils.h"
+#include "commonroad_cpp/obstacle/obstacle_operations.h"
+#include "commonroad_cpp/world.h"
 #include "foxglove/foxglove.hpp"
 #include "foxglove/mcap.hpp"
 #include "foxglove/server.hpp"
@@ -44,6 +46,8 @@ private:
   foxglove::schemas::SceneUpdate get_ego_scene_update(const foxglove::schemas::Pose& ego_pose);
   foxglove::schemas::SceneUpdate get_lane_scene_update(const foxglove::schemas::Pose& ego_pose);
   foxglove::schemas::SceneUpdate get_trajectory_scene_update(void) const;
+  foxglove::schemas::SceneUpdate get_lanelets_scene_update(
+      const std::vector<std::shared_ptr<Lanelet>>& lanelets) const;
 
 private:
   StateInfo ego_state_;
@@ -56,12 +60,15 @@ private:
   std::atomic<bool> running_{false};
   mutable std::shared_mutex ego_state_mutex_;
 
+  std::unique_ptr<World> world_{nullptr};
+
   bool save_mcap_{false};
   std::unique_ptr<foxglove::McapWriter> mcap_writer_{nullptr};
   std::unique_ptr<foxglove::WebSocketServer> socket_server_{nullptr};
   std::unique_ptr<foxglove::RawChannel> loop_runtime_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> ego_car_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> lane_lines_channel_{nullptr};
+  std::unique_ptr<foxglove::schemas::SceneUpdateChannel> lanelet_scene_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::SceneUpdateChannel> trajectory_channel_{nullptr};
   std::unique_ptr<foxglove::schemas::FrameTransformChannel> transform_channel_{nullptr};
   std::unique_ptr<foxglove::RawChannel> planning_info_channel_{nullptr};

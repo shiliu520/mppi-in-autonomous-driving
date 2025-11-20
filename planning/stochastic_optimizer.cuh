@@ -1,8 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:16:24
- * @LastEditors: puyu yu.pu@qq.com
- * @LastEditTime: 2025-11-19 23:54:52
+ * @LastEditTime: 2025-11-20 23:53:21
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -15,12 +14,15 @@
 #include "trajectory_cost.cuh"
 #include "vehicle_dynamics.cuh"
 
+#include <Eigen/Core>
+
 class StochasticOptimizer {
 public:
   StochasticOptimizer(/* args */);
   ~StochasticOptimizer();
 
   ControlInput plan_once(const StateInfo& _current_state);
+  Eigen::MatrixXf get_optimized_trajectory() const;
 
 private:
   using SAMPLER_T =

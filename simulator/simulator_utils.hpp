@@ -1,8 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:04:19
- * @LastEditors: puyu yu.pu@qq.com
- * @LastEditTime: 2025-11-18 23:36:37
+ * @LastEditTime: 2025-11-20 23:09:51
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator_utils.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */

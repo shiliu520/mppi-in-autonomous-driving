@@ -1,3 +1,11 @@
+/*
+ * @Author: puyu yu.pu@qq.com
+ * @Date: 2025-11-17 23:39:47
+ * @LastEditTime: 2025-11-20 23:53:32
+ * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
+ * Copyright (c) 2025 by puyu, All Rights Reserved.
+ */
+
 #include "stochastic_optimizer.cuh"
 
 StochasticOptimizer::StochasticOptimizer(/* args */) {
@@ -67,4 +75,8 @@ ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state) {
   mppi_controller_->slideControlSequence(1);
 
   return {next_state(4), next_state(5)};
+}
+
+Eigen::MatrixXf StochasticOptimizer::get_optimized_trajectory() const {
+  return mppi_controller_->getTargetStateSeq();
 }

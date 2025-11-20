@@ -1,3 +1,11 @@
+/*
+ * @Author: puyu yu.pu@qq.com
+ * @Date: 2025-11-17 23:21:08
+ * @LastEditTime: 2025-11-20 23:10:50
+ * @FilePath: /mppi-in-autonomous-driving/planning/vehicle_dynamics.cuh
+ * Copyright (c) 2025 by puyu, All Rights Reserved.
+ */
+
 #pragma once
 
 #include "mppi/dynamics/dynamics.cuh"
