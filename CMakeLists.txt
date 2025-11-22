@@ -18,12 +18,31 @@ find_package(spdlog REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Eigen3 REQUIRED)
+find_package(Protobuf REQUIRED)
 
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/environment-model)
 set(MPPI_BUILD_TESTS OFF CACHE BOOL "Disable MPPI tests/internal libs" FORCE)
 set(MPPI_BUILD_EXAMPLES OFF CACHE BOOL "Disable MPPI examples" FORCE)
 set(MPPI_USE_CUDA_BARRIERS OFF CACHE BOOL "Disable CUDA barriers for older GPUs" FORCE)
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic)
+
+# Protobuf: generate sources
+set(PROTO_FILES "${PROJECT_SOURCE_DIR}/common/protos/planning_info.proto")
+set(PROTO_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/common/protos")
+get_filename_component(PROTO_FILE_WE ${PROTO_FILES} NAME_WE)
+set(PROTO_SRCS "${PROTO_OUTPUT_DIR}/${PROTO_FILE_WE}.pb.cc")
+set(PROTO_HDRS "${PROTO_OUTPUT_DIR}/${PROTO_FILE_WE}.pb.h")
+add_custom_command(
+    OUTPUT ${PROTO_SRCS} ${PROTO_HDRS}
+    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+    ARGS --cpp_out=${PROTO_OUTPUT_DIR} --proto_path=${PROTO_OUTPUT_DIR} ${PROTO_FILES}
+    DEPENDS ${PROTO_FILES}
+    COMMENT "Generating C++ from ${PROTO_FILES}"
+    VERBATIM
+)
+
+# Create a custom target to ensure protobuf files are generated
+add_custom_target(generate_proto DEPENDS ${PROTO_SRCS} ${PROTO_HDRS})
 
 # Foxglove SDK (headers + prebuilt static lib)
 set(FOXGLOVE_SOURCE_DIR "${PROJECT_SOURCE_DIR}/3rdparty/foxglove")
@@ -79,8 +98,14 @@ target_link_libraries(planning
 )
 
 # Executable
-add_executable(planning_node planning_node.cpp)
+add_executable(planning_node planning_node.cpp ${PROTO_SRCS})
+add_dependencies(planning_node generate_proto)
 target_sources(planning_node PRIVATE ${FOXGLOVE_SOURCES})
+target_include_directories(planning_node
+    PRIVATE
+        ${PROTO_OUTPUT_DIR}
+        ${Protobuf_INCLUDE_DIRS}
+)
 target_link_libraries(planning_node
     PRIVATE
         simulator
@@ -89,6 +114,7 @@ target_link_libraries(planning_node
         yaml-cpp
         foxglove_sdk
         Threads::Threads
+        ${Protobuf_LIBRARIES}
         dl
 )
 

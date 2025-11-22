@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package planning.protos;
+
+message TrajectoryPoint {
+  float pos_x = 1;
+  float pos_y = 2;
+  float velocity = 3;
+  float heading = 4;
+  float accel = 5;
+  float steer = 6;
+}
+
+message Control {
+  float jerk = 1;
+  float steer_rate = 2;
+}
+
+message StateSeq {
+  repeated TrajectoryPoint state = 1;
+}
+
+message ControlSeq {
+  repeated Control control = 1;
+}
+
+message Time {
+    uint32 sec = 1;
+    uint32 nsec = 2;
+}
+
+message Header {
+    uint32 seq = 1;
+    Time stamp = 2;
+    string frame_id = 3;
+}
+
+message PlanningInfo {
+    TrajectoryPoint current_state = 2;
+    float target_accel = 3;
+    float target_steer = 4;
+    float cruise_velocity = 5;
+    float cost_time_ms = 6;
+    float optimal_cost = 7;
+    repeated TrajectoryPoint optimal_trajectory = 8;
+    repeated Control optimal_control_seq = 9;
+    repeated StateSeq sample_xs = 10;
+    repeated ControlSeq sample_us = 11;
+}

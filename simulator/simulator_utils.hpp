@@ -11,6 +11,7 @@
 #include "foxglove/schemas.hpp"
 
 #include <cmath>
+#include <vector>
 
 inline foxglove::schemas::Quaternion yaw_to_quaternion(double yaw) {
   foxglove::schemas::Quaternion q;
@@ -19,4 +20,109 @@ inline foxglove::schemas::Quaternion yaw_to_quaternion(double yaw) {
   q.z = std::sin(yaw * 0.5);
   q.w = std::cos(yaw * 0.5);
   return q;
+}
+
+/**
+ * @brief Create a line using mesh triangulation to avoid transparency issues
+ *
+ * This function creates a TriangleListPrimitive representing a line with given thickness.
+ * Using mesh triangulation avoids the "sugar-coated haws" effect (darker color near points)
+ * that occurs with LinePrimitive when transparency is less than 1.
+ *
+ * @param points Vector of 3D points defining the line path
+ * @param thickness Line thickness (width perpendicular to line direction)
+ * @param color Line color (RGBA)
+ * @return foxglove::schemas::TriangleListPrimitive Triangle mesh representing the line
+ */
+inline foxglove::schemas::TriangleListPrimitive create_line_mesh(
+    const std::vector<foxglove::schemas::Point3>& points,
+    double thickness,
+    const foxglove::schemas::Color& color) {
+  foxglove::schemas::TriangleListPrimitive mesh;
+
+  if (points.size() < 2) {
+    return mesh;  // Need at least 2 points to draw a line
+  }
+
+  const double half_thickness = thickness * 0.5;
+  std::vector<foxglove::schemas::Point3> left_vertices;
+  std::vector<foxglove::schemas::Point3> right_vertices;
+
+  // Generate vertices along the line with perpendicular offset
+  for (size_t i = 0; i < points.size(); ++i) {
+    const auto& curr = points[i];
+    foxglove::schemas::Vector3 direction{0.0, 0.0, 0.0};
+
+    // Calculate tangent direction
+    if (i == 0) {
+      // First point: use direction to next point
+      direction.x = points[i + 1].x - curr.x;
+      direction.y = points[i + 1].y - curr.y;
+      direction.z = points[i + 1].z - curr.z;
+    } else if (i == points.size() - 1) {
+      // Last point: use direction from previous point
+      direction.x = curr.x - points[i - 1].x;
+      direction.y = curr.y - points[i - 1].y;
+      direction.z = curr.z - points[i - 1].z;
+    } else {
+      // Middle points: use average of incoming and outgoing directions
+      double dx1 = curr.x - points[i - 1].x;
+      double dy1 = curr.y - points[i - 1].y;
+      double dz1 = curr.z - points[i - 1].z;
+      double dx2 = points[i + 1].x - curr.x;
+      double dy2 = points[i + 1].y - curr.y;
+      double dz2 = points[i + 1].z - curr.z;
+      direction.x = dx1 + dx2;
+      direction.y = dy1 + dy2;
+      direction.z = dz1 + dz2;
+    }
+
+    // Normalize direction
+    double length = std::sqrt(direction.x * direction.x +
+                              direction.y * direction.y +
+                              direction.z * direction.z);
+    if (length > 1e-10) {
+      direction.x /= length;
+      direction.y /= length;
+      direction.z /= length;
+    }
+
+    // Calculate perpendicular offset (assuming line is in XY plane, perpendicular is in XY)
+    foxglove::schemas::Vector3 perpendicular;
+    perpendicular.x = -direction.y;
+    perpendicular.y = direction.x;
+    perpendicular.z = 0.0;
+
+    // Create left and right vertices
+    foxglove::schemas::Point3 left_vertex;
+    left_vertex.x = curr.x + perpendicular.x * half_thickness;
+    left_vertex.y = curr.y + perpendicular.y * half_thickness;
+    left_vertex.z = curr.z;
+
+    foxglove::schemas::Point3 right_vertex;
+    right_vertex.x = curr.x - perpendicular.x * half_thickness;
+    right_vertex.y = curr.y - perpendicular.y * half_thickness;
+    right_vertex.z = curr.z;
+
+    left_vertices.push_back(left_vertex);
+    right_vertices.push_back(right_vertex);
+  }
+
+  // Create triangles connecting adjacent vertex pairs
+  for (size_t i = 0; i < points.size() - 1; ++i) {
+    // First triangle: left[i], right[i], left[i+1]
+    mesh.points.push_back(left_vertices[i]);
+    mesh.points.push_back(right_vertices[i]);
+    mesh.points.push_back(left_vertices[i + 1]);
+
+    // Second triangle: right[i], right[i+1], left[i+1]
+    mesh.points.push_back(right_vertices[i]);
+    mesh.points.push_back(right_vertices[i + 1]);
+    mesh.points.push_back(left_vertices[i + 1]);
+  }
+
+  // Set uniform color for the entire mesh
+  mesh.color = color;
+
+  return mesh;
 }

@@ -1,8 +1,8 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:18:52
- * @LastEditors: puyu yu.pu@qq.com
- * @LastEditTime: 2025-11-18 23:59:53
+ * @LastEditors: Please set LastEditors
+ * @LastEditTime: 2025-11-22 21:04:07
  * @FilePath: /mppi-in-autonomous-driving/common/common.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -33,12 +33,12 @@ struct StateInfo {
   double x{0};         // position x (m)
   double y{0};         // position y (m)
   double velocity{0};  // velocity (m/s)
-  double yaw{0};       // heading angle (rad)
+  double heading{0};   // heading angle (rad)
   double accel{0};     // acceleration (m/s^2)
   double steer{0};     // front wheel steering angle (rad)
 
   foxglove::schemas::Pose to_pose() const {
-    const double half_yaw = 0.5 * yaw;
+    const double half_yaw = 0.5 * heading;
     foxglove::schemas::Pose pose;
     pose.position = foxglove::schemas::Vector3{x, y, 0.0};
     pose.orientation = foxglove::schemas::Quaternion{0.0, 0.0, sin(half_yaw), cos(half_yaw)};
@@ -81,6 +81,22 @@ public:
     oss << std::put_time(std::localtime(&t), "%Y-%m-%d-%H-%M-%S");
     return oss.str();
   }
+};
+
+class TicToc {
+public:
+  TicToc(void) { tic(); }
+
+  void tic(void) { start = std::chrono::system_clock::now(); }
+
+  double toc(void) {
+    end = std::chrono::system_clock::now();
+    std::chrono::duration<double> elapsed_seconds = end - start;
+    return elapsed_seconds.count();
+  }
+
+private:
+  std::chrono::time_point<std::chrono::system_clock> start, end;
 };
 
 /**

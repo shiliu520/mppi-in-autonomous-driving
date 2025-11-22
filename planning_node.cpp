@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:59:20
- * @LastEditTime: 2025-11-20 23:54:13
+ * @LastEditTime: 2025-11-22 16:25:15
  * @FilePath: /mppi-in-autonomous-driving/planning_node.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -30,8 +30,9 @@ int main(int argc, char** argv) {
   while (!done) {
     auto ego_state = simulator.get_ego_state();
     auto control_input = optimizer.plan_once(ego_state);
-    auto optimized_trajectory = optimizer.get_optimized_trajectory();
+    auto planning_info = optimizer.get_debug_result(ego_state);
     simulator.set_ego_control_input(control_input);
+    simulator.update_planning_info(planning_info);
 
     next_tick += std::chrono::milliseconds(100);
     std::this_thread::sleep_until(next_tick);
