@@ -17,11 +17,8 @@ message Control {
 }
 
 message StateSeq {
-  repeated TrajectoryPoint state = 1;
-}
-
-message ControlSeq {
-  repeated Control control = 1;
+  float cost = 1;
+  repeated TrajectoryPoint trajectory = 2;
 }
 
 message Time {
@@ -36,14 +33,14 @@ message Header {
 }
 
 message PlanningInfo {
-    TrajectoryPoint current_state = 2;
-    float target_accel = 3;
-    float target_steer = 4;
-    float cruise_velocity = 5;
-    float cost_time_ms = 6;
-    float optimal_cost = 7;
-    repeated TrajectoryPoint optimal_trajectory = 8;
-    repeated Control optimal_control_seq = 9;
+    TrajectoryPoint current_state = 1;
+    float target_accel = 2;
+    float target_steer = 3;
+    float cruise_velocity = 4;
+    float cost_time_ms = 5;
+    float optimal_cost = 6;
+    repeated TrajectoryPoint optimal_trajectory = 7;
+    repeated Control optimal_control_seq = 8;
+    repeated float frame_cost_seq = 9;
     repeated StateSeq sample_xs = 10;
-    repeated ControlSeq sample_us = 11;
 }

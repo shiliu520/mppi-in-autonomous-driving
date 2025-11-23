@@ -1,20 +1,20 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-22 21:28:22
+ * @LastEditTime: 2025-11-23 22:18:58
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #include "common/common.hpp"
+#include "common/cubic_spline.hpp"
 #include "commonroad_cpp/interfaces/commonroad/input_utils.h"
 #include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
 #include "commonroad_cpp/roadNetwork/road_network.h"
-#include "cubic_spline.hpp"
 #include "simulator.hpp"
 
-#include <spdlog/sinks/stdout_color_sinks.h>
 #include <google/protobuf/descriptor.pb.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <algorithm>
 #include <filesystem>
@@ -27,7 +27,7 @@
 Simulator::Simulator() {
   auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
   logger_ = std::make_shared<spdlog::logger>("simulator_logger", console_sink);
-  logger_->set_level(spdlog::level::from_str("debug"));
+  logger_->set_level(spdlog::level::from_str("info"));
   logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
 
   save_mcap_ = true;
@@ -39,6 +39,7 @@ Simulator::Simulator() {
   ego_state_.accel = 0;
   ego_state_.steer = 0;
 
+  // TODO: Load scenario from CommonRoad file, something hardcoded for testing now
   std::string pathToTestFileOne{
       "/home/puyu/codes/mppi-in-autonomous-driving/scenarios/static_test.xml"};
   const auto& [obstaclesScenarioOne, roadNetworkScenarioOne, timeStepSizeOne, planningProblems] =
@@ -46,8 +47,39 @@ Simulator::Simulator() {
   WorldParameters wp{RoadNetworkParameters(), SensorParameters(), ActuatorParameters::egoDefaults(),
                      TimeParameters(5, 0.3, 0.1), ActuatorParameters::vehicleDefaults()};
   std::vector<std::shared_ptr<Obstacle>> egos = {};
-  world_ = std::make_unique<World>("ARG_Carcarana-6_5_T-1", 0, roadNetworkScenarioOne, egos,
-                                   obstaclesScenarioOne, timeStepSizeOne, wp);
+  sim_world_ = std::make_unique<World>("ARG_Carcarana-6_5_T-1", 0, roadNetworkScenarioOne, egos,
+                                       obstaclesScenarioOne, timeStepSizeOne, wp);
+
+  const std::shared_ptr<LaneletGraph>& topo_graph =
+      sim_world_->getRoadNetwork()->getTopologicalMap();
+  auto paths = topo_graph->findPaths(2, 22, true);
+  if (!paths.empty()) {
+    std::vector<double> ref_xs;
+    std::vector<double> ref_ys;
+    for (const auto& lanelet_id : paths) {
+      LOG_INFO(logger_, "Lanelet ID in routing: {}", lanelet_id);
+      auto lanelet = sim_world_->getRoadNetwork()->findLaneletById(lanelet_id);
+      for (const auto& vertex : lanelet->getCenterVertices()) {
+        if (ref_xs.size() > 0) {
+          const double last_x = ref_xs.back();
+          const double last_y = ref_ys.back();
+          const double dist =
+              std::sqrt(std::pow(vertex.x - last_x, 2) + std::pow(vertex.y - last_y, 2));
+          if (dist < 0.1) {
+            continue;
+          }
+        }
+        ref_xs.push_back(vertex.x);
+        ref_ys.push_back(vertex.y);
+      }
+    }
+    reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.2);
+    LOG_INFO(logger_, "Reference line created with {} points, length {:.2f} m",
+             reference_line_->size(), reference_line_->length());
+  } else {
+    LOG_ERROR(logger_, "No path found from lanelet 2 to 22");
+    reference_line_ = nullptr;
+  }
 }
 
 Simulator::~Simulator() { stop(); }
@@ -73,6 +105,7 @@ bool Simulator::start() {
     }
     std::string mcap_file_path = mcap_save_dir / ("mppi_" + TimeUtil::NowTimeString() + ".mcap");
     mcap_options.path = mcap_file_path;
+    mcap_options.compression = foxglove::McapCompression::Lz4;
     auto writer_result = foxglove::McapWriter::create(mcap_options);
     if (!writer_result.has_value()) {
       LOG_ERROR(logger_, "Failed to create writer: {}", foxglove::strerror(writer_result.error()));
@@ -100,6 +133,10 @@ void Simulator::stop() {
 }
 
 void Simulator::simulation_loop() {
+  if (reference_line_) {
+    reference_line_channel_->log(get_reference_line_scene_update());
+  }
+
   const auto loop_start = std::chrono::steady_clock::now();
   auto next_tick = loop_start;
   uint32_t loop_count = 0;
@@ -108,9 +145,8 @@ void Simulator::simulation_loop() {
 
     const auto ego_pose = get_ego_state().to_pose();
     const auto ego_car_scene_update = get_ego_scene_update();
-    // const auto lane_scene_update = get_lane_scene_update(ego_pose);
 
-    foxglove::schemas::FrameTransform transform;
+    FrameTransform transform;
     transform.timestamp = TimeUtil::NowTimestamp();
     transform.parent_frame_id = "map";
     transform.child_frame_id = "base_link";
@@ -130,13 +166,15 @@ void Simulator::simulation_loop() {
       planning_info_channel_->log(reinterpret_cast<const std::byte*>(debug_info_data.data()),
                                   debug_info_data.size());
       const auto traj_scene_update = get_trajectory_scene_update();
+      const auto sampled_scene_update = get_sampled_scene_update();
       trajectory_channel_->log(traj_scene_update);
+      sampled_channel_->log(sampled_scene_update);
       planning_info_updated_.store(false);
     }
 
-    if (loop_count++ % 50 == 0) {
+    if (loop_count++ % 250 == 0) {
       lanelet_scene_channel_->log(
-          get_lanelets_scene_update(world_->getRoadNetwork()->getLaneletNetwork()));
+          get_lanelets_scene_update(sim_world_->getRoadNetwork()->getLaneletNetwork()));
     }
 
     next_tick += std::chrono::milliseconds(20);
@@ -186,8 +224,6 @@ void Simulator::update_ego_state() {
 bool Simulator::register_publish_channels(void) {
   using foxglove::RawChannel;
   using foxglove::WebSocketServer;
-  using foxglove::schemas::FrameTransformChannel;
-  using foxglove::schemas::SceneUpdateChannel;
 
   foxglove::setLogLevel(foxglove::LogLevel::Error);
   foxglove::WebSocketServerOptions ws_options;
@@ -208,8 +244,9 @@ bool Simulator::register_publish_channels(void) {
   loop_runtime_channel_ = make_channel(RawChannel::create("/simulation/runtime_secs", "json"));
   ego_car_channel_ = make_channel(SceneUpdateChannel::create("/markers/ego_car"));
   lanelet_scene_channel_ = make_channel(SceneUpdateChannel::create("/markers/hdmap_lanelets"));
-  lane_lines_channel_ = make_channel(SceneUpdateChannel::create("/markers/lane_lines"));
   trajectory_channel_ = make_channel(SceneUpdateChannel::create("/markers/trajectory"));
+  sampled_channel_ = make_channel(SceneUpdateChannel::create("/markers/sampled_trajectories"));
+  reference_line_channel_ = make_channel(SceneUpdateChannel::create("/markers/reference_line"));
   transform_channel_ = make_channel(FrameTransformChannel::create("/transform/map_to_baselink"));
 
   auto descriptor = planning::protos::PlanningInfo::descriptor();
@@ -229,137 +266,74 @@ bool Simulator::register_publish_channels(void) {
   return true;
 }
 
-foxglove::schemas::SceneUpdate Simulator::get_ego_scene_update() {
-  foxglove::schemas::ModelPrimitive ego_model;
+SceneUpdate Simulator::get_ego_scene_update() const {
+  ModelPrimitive ego_model;
   ego_model.url =
       "https://raw.githubusercontent.com/PuYuuu/dive-into-contingency-planning/master/assets/"
       "mesh/lexus.glb";
-  ego_model.pose = {.position = foxglove::schemas::Vector3{0.0, 0.0, 0.0},
-                    .orientation = foxglove::schemas::Quaternion{0.0, 0.0, 0.0, 1.0}};
+  ego_model.pose = construct_pose();
   ego_model.scale = {1, 1, 1};
   ego_model.media_type = "model/gltf-binary";
   ego_model.override_color = false;
 
-  foxglove::schemas::SceneEntity ego_car_entity;
+  SceneEntity ego_car_entity;
   ego_car_entity.id = "ego_car";
   ego_car_entity.frame_id = "base_link";
   ego_car_entity.models.emplace_back(ego_model);
   ego_car_entity.timestamp = TimeUtil::NowTimestamp();
-  ego_car_entity.lifetime = foxglove::schemas::Duration{0, 100000000};
+  ego_car_entity.lifetime = Duration{0, 100000000};
 
-  foxglove::schemas::SceneUpdate ego_car_scene_update;
+  SceneUpdate ego_car_scene_update;
   ego_car_scene_update.entities.emplace_back(ego_car_entity);
 
   return ego_car_scene_update;
 }
 
-foxglove::schemas::SceneUpdate Simulator::get_lane_scene_update(
-    const foxglove::schemas::Pose& ego_pose) {
-  double ego_position_x = ego_pose.position.has_value() ? ego_pose.position->x : 0.0;
-  foxglove::schemas::SceneUpdate lane_scene_update;
-  foxglove::schemas::SceneEntity lane_entity;
-  lane_entity.id = "lane_lines";
-  lane_entity.frame_id = "map";
-  lane_entity.timestamp = TimeUtil::NowTimestamp();
-  lane_entity.lifetime = foxglove::schemas::Duration{0, 100000000};
-
-  foxglove::schemas::Pose lane_pose =
-      foxglove::schemas::Pose{.position = foxglove::schemas::Vector3{0.0, 0.0, 0.0},
-                              .orientation = foxglove::schemas::Quaternion{0.0, 0.0, 0.0, 1.0}};
-  foxglove::schemas::Color lane_color = foxglove::schemas::Color{1.0, 1.0, 1.0, 1.0};
-
-  foxglove::schemas::LinePrimitive left_line;
-  left_line.type = foxglove::schemas::LinePrimitive::LineType::LINE_STRIP;
-  left_line.pose = lane_pose;
-  left_line.thickness = 0.12;
-  left_line.scale_invariant = false;
-  left_line.color = lane_color;
-  foxglove::schemas::Point3 start_point{ego_position_x - 20.0, 3.4 / 2.0, 0.0};
-  foxglove::schemas::Point3 end_point{ego_position_x + 100.0, 3.4 / 2.0, 0.0};
-  left_line.points.push_back(start_point);
-  left_line.points.push_back(end_point);
-  lane_entity.lines.push_back(left_line);
-
-  foxglove::schemas::LinePrimitive right_line;
-  right_line.type = foxglove::schemas::LinePrimitive::LineType::LINE_STRIP;
-  right_line.pose = lane_pose;
-  right_line.thickness = 0.12;
-  right_line.scale_invariant = false;
-  right_line.color = lane_color;
-  start_point = foxglove::schemas::Point3{ego_position_x - 20.0, -3.4 / 2.0, 0.0};
-  end_point = foxglove::schemas::Point3{ego_position_x + 100.0, -3.4 / 2.0, 0.0};
-  right_line.points.push_back(start_point);
-  right_line.points.push_back(end_point);
-  lane_entity.lines.push_back(right_line);
-
-  foxglove::schemas::LinePrimitive center_line;
-  center_line.type = foxglove::schemas::LinePrimitive::LineType::LINE_LIST;
-  center_line.pose = lane_pose;
-  center_line.thickness = 0.08;
-  center_line.scale_invariant = false;
-  center_line.color = lane_color;
-  for (double x = ego_position_x - 20.0; x < ego_position_x + 100.0; x += 5.0) {
-    foxglove::schemas::Point3 point{x, 0.0, 0.0};
-    center_line.points.push_back(point);
-  }
-  lane_entity.lines.push_back(center_line);
-  lane_scene_update.entities.push_back(lane_entity);
-
-  return lane_scene_update;
-}
-
-foxglove::schemas::SceneUpdate Simulator::get_trajectory_scene_update(void) const {
-  foxglove::schemas::SceneUpdate traj_scene_update;
-  foxglove::schemas::SceneEntity traj_entity;
+SceneUpdate Simulator::get_trajectory_scene_update(void) const {
+  SceneUpdate traj_scene_update;
+  SceneEntity traj_entity;
   traj_entity.id = "trajectory";
   traj_entity.frame_id = "map";
   traj_entity.timestamp = TimeUtil::NowTimestamp();
-  traj_entity.lifetime = foxglove::schemas::Duration{0, 200000000};
+  traj_entity.lifetime = Duration{0, 200000000};
 
-  foxglove::schemas::Pose traj_pose =
-      foxglove::schemas::Pose{.position = foxglove::schemas::Vector3{0.0, 0.0, 0.0},
-                              .orientation = foxglove::schemas::Quaternion{0.0, 0.0, 0.0, 1.0}};
-  foxglove::schemas::Color traj_color = foxglove::schemas::Color{0.0, 0.4, 0.75, 0.9};
-
+  Color traj_color = Color{0.0, 0.4, 0.75, 0.9};
   {
     std::shared_lock lock(planning_info_mutex_);
-    std::vector<foxglove::schemas::Point3> traj_points;
+    std::vector<Point3> traj_points;
     const auto& optimal_trajectory = planning_info_.optimal_trajectory();
-    for (size_t idx = 0; idx < planning_info_.optimal_trajectory_size(); ++idx) {
+    for (int idx = 0; idx < planning_info_.optimal_trajectory_size(); ++idx) {
       const float x = optimal_trajectory.at(idx).pos_x();
       const float y = optimal_trajectory.at(idx).pos_y();
-      foxglove::schemas::Point3 point{x, y, 0.0};
+      Point3 point{x, y, 0.0};
       traj_points.emplace_back(point);
     }
-    traj_entity.triangles.emplace_back(create_line_mesh(traj_points, 1.35, traj_color));
+    traj_entity.triangles.emplace_back(create_line_mesh(traj_points, 1.4, traj_color, true));
   }
   traj_scene_update.entities.emplace_back(traj_entity);
   return traj_scene_update;
 }
 
-foxglove::schemas::SceneUpdate Simulator::get_lanelets_scene_update(
+SceneUpdate Simulator::get_lanelets_scene_update(
     const std::vector<std::shared_ptr<Lanelet>>& lanelets) const {
-  static foxglove::schemas::SceneUpdate lanelet_scene_update;
+  static SceneUpdate lanelet_scene_update;
   static bool is_hdmap_lanelets_initialized = false;
   if (is_hdmap_lanelets_initialized) {
     return lanelet_scene_update;
   }
-  foxglove::schemas::SceneEntity lanelet_entity;
+  SceneEntity lanelet_entity;
   lanelet_entity.id = "lanelets";
   lanelet_entity.frame_id = "map";
   lanelet_entity.timestamp = TimeUtil::NowTimestamp();
-  lanelet_entity.lifetime = foxglove::schemas::Duration{0, 0};
+  lanelet_entity.lifetime = Duration{0, 0};
 
-  foxglove::schemas::Pose lane_pose =
-      foxglove::schemas::Pose{.position = foxglove::schemas::Vector3{0.0, 0.0, 0.0},
-                              .orientation = foxglove::schemas::Quaternion{0.0, 0.0, 0.0, 1.0}};
-  foxglove::schemas::Color lane_color = foxglove::schemas::Color{1.0, 1.0, 1.0, 1.0};
-  foxglove::schemas::Color road_edge_color = foxglove::schemas::Color{0.9, 0.2, 0.2, 1.0};
-
+  auto lane_pose = construct_pose();
+  auto lane_color = Color{1.0, 1.0, 1.0, 1.0};
+  auto road_edge_color = Color{0.9, 0.2, 0.2, 1.0};
   for (const auto& lanelet : lanelets) {
     LOG_INFO(logger_, "Lanelet ID: {}", lanelet->getId());
-    foxglove::schemas::LinePrimitive left_border_line;
-    left_border_line.type = foxglove::schemas::LinePrimitive::LineType::LINE_STRIP;
+    LinePrimitive left_border_line;
+    left_border_line.type = LinePrimitive::LineType::LINE_STRIP;
     left_border_line.pose = lane_pose;
     left_border_line.thickness = 0.18;
     left_border_line.scale_invariant = false;
@@ -377,7 +351,7 @@ foxglove::schemas::SceneUpdate Simulator::get_lanelets_scene_update(
     auto left_spline = CubicSpline2D(left_xs, left_ys);
     for (double s = 0.0; s < left_spline.s.back(); s += 0.5) {
       auto pos = left_spline.calc_position(s);
-      foxglove::schemas::Point3 point;
+      Point3 point;
       point.x = pos.x();
       point.y = pos.y();
       point.z = 0.0;
@@ -385,8 +359,8 @@ foxglove::schemas::SceneUpdate Simulator::get_lanelets_scene_update(
     }
     lanelet_entity.lines.emplace_back(left_border_line);
 
-    foxglove::schemas::LinePrimitive right_border_line;
-    right_border_line.type = foxglove::schemas::LinePrimitive::LineType::LINE_STRIP;
+    LinePrimitive right_border_line;
+    right_border_line.type = LinePrimitive::LineType::LINE_STRIP;
     right_border_line.pose = lane_pose;
     right_border_line.thickness = 0.18;
     right_border_line.scale_invariant = false;
@@ -404,7 +378,7 @@ foxglove::schemas::SceneUpdate Simulator::get_lanelets_scene_update(
     auto right_spline = CubicSpline2D(right_xs, right_ys);
     for (double s = 0.0; s < right_spline.s.back(); s += 0.5) {
       auto pos = right_spline.calc_position(s);
-      foxglove::schemas::Point3 point;
+      Point3 point;
       point.x = pos.x();
       point.y = pos.y();
       point.z = 0.0;
@@ -412,8 +386,8 @@ foxglove::schemas::SceneUpdate Simulator::get_lanelets_scene_update(
     }
     lanelet_entity.lines.emplace_back(right_border_line);
 
-    foxglove::schemas::LinePrimitive center_line;
-    center_line.type = foxglove::schemas::LinePrimitive::LineType::LINE_LIST;
+    LinePrimitive center_line;
+    center_line.type = LinePrimitive::LineType::LINE_LIST;
     center_line.pose = lane_pose;
     center_line.thickness = 0.12;
     center_line.scale_invariant = false;
@@ -426,7 +400,7 @@ foxglove::schemas::SceneUpdate Simulator::get_lanelets_scene_update(
     auto center_spline = CubicSpline2D(center_xs, center_ys);
     for (double s = 0.0; s < center_spline.s.back(); s += 3.0) {
       auto pos = center_spline.calc_position(s);
-      foxglove::schemas::Point3 point;
+      Point3 point;
       point.x = pos.x();
       point.y = pos.y();
       point.z = 0.0;
@@ -444,4 +418,90 @@ void Simulator::update_planning_info(const planning::protos::PlanningInfo& info)
   std::unique_lock lock(planning_info_mutex_);
   planning_info_.CopyFrom(info);
   planning_info_updated_.store(true);
+}
+
+SceneUpdate Simulator::get_sampled_scene_update(void) const {
+  SceneUpdate traj_scene_update;
+  SceneEntity traj_entity;
+  traj_entity.id = "sampled_trajectory";
+  traj_entity.frame_id = "map";
+  traj_entity.timestamp = TimeUtil::NowTimestamp();
+  traj_entity.lifetime = Duration{0, 200000000};
+
+  auto traj_pose = construct_pose();
+  auto traj_color = Color{0.0, 0.8, 0.8, 0.9};
+
+  {
+    std::shared_lock lock(planning_info_mutex_);
+    const auto& sampled_trajectory = planning_info_.sample_xs();
+    for (int seq_idx = 0; seq_idx < planning_info_.sample_xs_size(); ++seq_idx) {
+      LinePrimitive sampled_line;
+      sampled_line.type = LinePrimitive::LineType::LINE_STRIP;
+      sampled_line.pose = traj_pose;
+      sampled_line.thickness = 0.2;
+      sampled_line.scale_invariant = false;
+      sampled_line.color = traj_color;
+      const auto& trajectory = sampled_trajectory.at(seq_idx).trajectory();
+      for (int idx = 0; idx < trajectory.size(); ++idx) {
+        const float x = trajectory.at(idx).pos_x();
+        const float y = trajectory.at(idx).pos_y();
+        Point3 point{x, y, 0.0};
+        sampled_line.points.emplace_back(point);
+      }
+      traj_entity.lines.emplace_back(sampled_line);
+    }
+  }
+  traj_scene_update.entities.emplace_back(traj_entity);
+  return traj_scene_update;
+}
+
+SceneUpdate Simulator::get_reference_line_scene_update(void) const {
+  static SceneUpdate ref_line_scene_update;
+  static bool is_routing_scene_initialized = false;
+  if (is_routing_scene_initialized) {
+    return ref_line_scene_update;
+  }
+  SceneEntity ref_line_entity;
+  ref_line_entity.id = "reference_line";
+  ref_line_entity.frame_id = "map";
+  ref_line_entity.timestamp = TimeUtil::NowTimestamp();
+  ref_line_entity.lifetime = Duration{0, 0};
+
+  Color ref_line_color = Color{0.36, 0.83, 0.66, 0.9};
+  LinePrimitive ref_line_primitive;
+  ref_line_primitive.type = LinePrimitive::LineType::LINE_STRIP;
+  ref_line_primitive.pose = construct_pose();
+  ref_line_primitive.thickness = 0.6;
+  ref_line_primitive.scale_invariant = false;
+  ref_line_primitive.color = ref_line_color;
+  const double sphere_radius = 0.6 * 2.0;
+  Vector3 sphere_size{sphere_radius, sphere_radius, sphere_radius};
+  if (reference_line_) {
+    for (size_t idx = 0; idx < reference_line_->size(); idx += 5) {
+      Point3 point;
+      point.x = reference_line_->at(idx).x();
+      point.y = reference_line_->at(idx).y();
+      point.z = 0.0;
+      ref_line_primitive.points.emplace_back(point);
+      if (idx % 50 == 0) {
+        SpherePrimitive ref_point_sphere;
+        ref_point_sphere.pose = construct_pose();
+        ref_point_sphere.pose->position->x = point.x;
+        ref_point_sphere.pose->position->y = point.y;
+        ref_point_sphere.size = sphere_size;
+        ref_point_sphere.color = ref_line_color;
+        ref_line_entity.spheres.emplace_back(ref_point_sphere);
+      }
+    }
+    ref_line_entity.lines.emplace_back(ref_line_primitive);
+    ref_line_scene_update.entities.emplace_back(ref_line_entity);
+  }
+  is_routing_scene_initialized = true;
+
+  return ref_line_scene_update;
+}
+
+std::shared_ptr<ReferenceLine> Simulator::get_reference_line(void) const {
+  std::shared_lock lock(reference_line_mutex_);
+  return reference_line_;
 }

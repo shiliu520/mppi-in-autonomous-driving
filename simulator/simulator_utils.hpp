@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:04:19
- * @LastEditTime: 2025-11-20 23:09:51
+ * @LastEditTime: 2025-11-23 21:06:56
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator_utils.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -22,6 +22,13 @@ inline foxglove::schemas::Quaternion yaw_to_quaternion(double yaw) {
   return q;
 }
 
+inline foxglove::schemas::Pose construct_pose(void) {
+  foxglove::schemas::Pose pose;
+  pose.position = foxglove::schemas::Vector3{0.0, 0.0, 0.0};
+  pose.orientation = foxglove::schemas::Quaternion{0.0, 0.0, 0.0, 1.0};
+  return pose;
+}
+
 /**
  * @brief Create a line using mesh triangulation to avoid transparency issues
  *
@@ -32,12 +39,14 @@ inline foxglove::schemas::Quaternion yaw_to_quaternion(double yaw) {
  * @param points Vector of 3D points defining the line path
  * @param thickness Line thickness (width perpendicular to line direction)
  * @param color Line color (RGBA)
+ * @param gradient_fade If true, alpha fades from start to 0 with non-linear decay
  * @return foxglove::schemas::TriangleListPrimitive Triangle mesh representing the line
  */
 inline foxglove::schemas::TriangleListPrimitive create_line_mesh(
     const std::vector<foxglove::schemas::Point3>& points,
     double thickness,
-    const foxglove::schemas::Color& color) {
+    const foxglove::schemas::Color& color,
+    bool gradient_fade = false) {
   foxglove::schemas::TriangleListPrimitive mesh;
 
   if (points.size() < 2) {
@@ -47,6 +56,7 @@ inline foxglove::schemas::TriangleListPrimitive create_line_mesh(
   const double half_thickness = thickness * 0.5;
   std::vector<foxglove::schemas::Point3> left_vertices;
   std::vector<foxglove::schemas::Point3> right_vertices;
+  std::vector<foxglove::schemas::Color> vertex_colors;
 
   // Generate vertices along the line with perpendicular offset
   for (size_t i = 0; i < points.size(); ++i) {
@@ -106,6 +116,16 @@ inline foxglove::schemas::TriangleListPrimitive create_line_mesh(
 
     left_vertices.push_back(left_vertex);
     right_vertices.push_back(right_vertex);
+
+    // Calculate color with gradient fade if enabled
+    if (gradient_fade) {
+      foxglove::schemas::Color vertex_color = color;
+      // Non-linear fade: use quadratic function (t^2) for slow start, fast end
+      double t = static_cast<double>(i) / static_cast<double>(points.size() - 1);
+      double alpha_multiplier = 1.0 - (t * t);  // Quadratic decay
+      vertex_color.a = color.a * alpha_multiplier;
+      vertex_colors.push_back(vertex_color);
+    }
   }
 
   // Create triangles connecting adjacent vertex pairs
@@ -119,10 +139,39 @@ inline foxglove::schemas::TriangleListPrimitive create_line_mesh(
     mesh.points.push_back(right_vertices[i]);
     mesh.points.push_back(right_vertices[i + 1]);
     mesh.points.push_back(left_vertices[i + 1]);
+
+    // Add per-vertex colors if gradient fade is enabled
+    if (gradient_fade) {
+      // First triangle vertices
+      mesh.colors.push_back(vertex_colors[i]);
+      mesh.colors.push_back(vertex_colors[i]);
+      mesh.colors.push_back(vertex_colors[i + 1]);
+
+      // Second triangle vertices
+      mesh.colors.push_back(vertex_colors[i]);
+      mesh.colors.push_back(vertex_colors[i + 1]);
+      mesh.colors.push_back(vertex_colors[i + 1]);
+    }
   }
 
-  // Set uniform color for the entire mesh
-  mesh.color = color;
+  // Set uniform color for the entire mesh if no gradient
+  if (!gradient_fade) {
+    mesh.color = color;
+  }
 
   return mesh;
 }
+
+// inline foxglove::schemas::SceneEntity create_point_line(
+//     const std::vector<foxglove::schemas::Point3>& points, double thickness,
+//     const foxglove::schemas::Color& color, size_t interval = 2) {
+//   SceneEntity line_entity;
+//   line_entity.id = "reference_line";
+//   line_entity.frame_id = "map";
+//   line_entity.timestamp = TimeUtil::NowTimestamp();
+//   line_entity.lifetime = Duration{0, 0};
+
+//   foxglove::schemas::LinePrimitive line_primitive;
+
+//   return line_entity;
+// }

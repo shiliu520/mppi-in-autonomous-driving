@@ -63,12 +63,13 @@ file(GLOB PLANNING_SOURCES CONFIGURE_DEPENDS
     "planning/*.cpp"
     "planning/*.cu"
 )
+file(GLOB COMMON_SOURCES CONFIGURE_DEPENDS "common/*.cpp")
 
 include_directories(${FOXGLOVE_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/3rdparty/environment-model/include/)
 
 # Simulator library
-add_library(simulator SHARED ${SIMULATOR_SOURCES})
+add_library(simulator SHARED ${SIMULATOR_SOURCES} ${COMMON_SOURCES})
 target_compile_definitions(simulator PUBLIC PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 target_include_directories(simulator
     PUBLIC
@@ -80,7 +81,7 @@ target_link_libraries(simulator
         EnvironmentModel::env_model
 )
 
-add_library(planning SHARED ${PLANNING_SOURCES})
+add_library(planning SHARED ${PLANNING_SOURCES} ${COMMON_SOURCES})
 set_target_properties(planning PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON

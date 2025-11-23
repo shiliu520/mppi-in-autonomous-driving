@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-11-22 21:12:54
+ * @LastEditTime: 2025-11-23 22:23:53
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -33,7 +33,7 @@ StochasticOptimizer::StochasticOptimizer(/* args */) {
 
   auto sampler_params = SAMPLER_T::SAMPLING_PARAMS_T();
   sampler_params.std_dev[0] = 0.5;
-  sampler_params.std_dev[1] = 0.05;
+  sampler_params.std_dev[1] = 0.04;
   sampler_ = new SAMPLER_T(sampler_params);
 
   ddp_feedback_ = new DDPFeedback<VehicleDynamics, num_timesteps>(dynamics_, delta_time_);
@@ -45,6 +45,9 @@ StochasticOptimizer::StochasticOptimizer(/* args */) {
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
   controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
   mppi_controller_->setParams(controller_params);
+  // mppi_controller_->setPercentageSampledControlTrajectoriesHelper(0.004);
+  // mppi_controller_->setPercentageSampledControlTrajectoriesHelper(0.0079);
+  mppi_controller_->setTopNSampledControlTrajectoriesHelper(128);
 }
 
 StochasticOptimizer::~StochasticOptimizer() {
@@ -55,7 +58,7 @@ StochasticOptimizer::~StochasticOptimizer() {
   delete mppi_controller_;
 }
 
-ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state) {
+ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state, const std::shared_ptr<ReferenceLine>& reference_line) {
   VehicleDynamics::state_array cur_state;
   VehicleDynamics::state_array next_state = dynamics_->getZeroState();
   VehicleDynamics::state_array xdot = dynamics_->getZeroState();
@@ -121,6 +124,28 @@ planning::protos::PlanningInfo StochasticOptimizer::get_debug_result(
     auto* control_proto = planning_info.add_optimal_control_seq();
     control_proto->set_jerk(optimal_control_seq(0, t));
     control_proto->set_steer_rate(optimal_control_seq(1, t));
+  }
+
+  mppi_controller_->calculateSampledStateTrajectories();
+  auto sampled_trajectories = mppi_controller_->getSampledOutputTrajectories();
+  auto sampled_costs = mppi_controller_->getSampledCostTrajectories();
+
+  for (const auto& traj : sampled_trajectories) {
+    auto* state_seq_proto = planning_info.add_sample_xs();
+    for (int t = 0; t < traj.cols(); t += 4) {
+      // downsample by 4 for brevity
+      auto* traj_point = state_seq_proto->add_trajectory();
+      traj_point->set_pos_x(traj(0, t));
+      traj_point->set_pos_y(traj(1, t));
+      traj_point->set_velocity(traj(2, t));
+      traj_point->set_heading(traj(3, t));
+      traj_point->set_accel(traj(4, t));
+      traj_point->set_steer(traj(5, t));
+    }
+  }
+
+  for (int i = 0; i < sampled_costs.size() && i < planning_info.sample_xs_size(); ++i) {
+    planning_info.mutable_sample_xs(i)->set_cost(sampled_costs[i].col(0).sum());
   }
 
   return planning_info;

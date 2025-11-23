@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-22 21:27:14
+ * @LastEditTime: 2025-11-23 22:18:37
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -9,6 +9,7 @@
 #pragma once
 
 #include "common/common.hpp"
+#include "common/reference_line.hpp"
 #include "common/protos/planning_info.pb.h"
 #include "commonroad_cpp/interfaces/commonroad/input_utils.h"
 #include "commonroad_cpp/obstacle/obstacle_operations.h"
@@ -30,6 +31,8 @@
 #include <thread>
 #include <unordered_map>
 
+using namespace foxglove::schemas;
+
 class Simulator {
 public:
   Simulator();
@@ -41,22 +44,25 @@ public:
   StateInfo get_ego_state() const;
   void set_ego_control_input(const ControlInput& input);
   void update_planning_info(const planning::protos::PlanningInfo& info);
+  std::shared_ptr<ReferenceLine> get_reference_line(void) const;
 
 private:
   void simulation_loop(void);
   void update_ego_state(void);
   bool register_publish_channels(void);
-  foxglove::schemas::SceneUpdate get_ego_scene_update();
-  foxglove::schemas::SceneUpdate get_lane_scene_update(const foxglove::schemas::Pose& ego_pose);
-  foxglove::schemas::SceneUpdate get_trajectory_scene_update(void) const;
-  foxglove::schemas::SceneUpdate get_lanelets_scene_update(
+  SceneUpdate get_ego_scene_update(void) const;
+  SceneUpdate get_trajectory_scene_update(void) const;
+  SceneUpdate get_sampled_scene_update(void) const;
+  SceneUpdate get_reference_line_scene_update(void) const;
+  SceneUpdate get_lanelets_scene_update(
       const std::vector<std::shared_ptr<Lanelet>>& lanelets) const;
 
 private:
   StateInfo ego_state_;
   VehicleInfo vehicle_info_;
   planning::protos::PlanningInfo planning_info_;
-  std::shared_ptr<spdlog::logger> logger_ = nullptr;
+  std::shared_ptr<ReferenceLine> reference_line_{nullptr};
+  std::shared_ptr<spdlog::logger> logger_{nullptr};
 
   double last_ego_update_time_ = 0.0;
 
@@ -65,17 +71,19 @@ private:
   std::atomic<bool> planning_info_updated_{false};
   mutable std::shared_mutex ego_state_mutex_;
   mutable std::shared_mutex planning_info_mutex_;
+  mutable std::shared_mutex reference_line_mutex_;
 
-  std::unique_ptr<World> world_{nullptr};
+  std::unique_ptr<World> sim_world_{nullptr};
 
   bool save_mcap_{false};
   std::unique_ptr<foxglove::McapWriter> mcap_writer_{nullptr};
   std::unique_ptr<foxglove::WebSocketServer> socket_server_{nullptr};
   std::unique_ptr<foxglove::RawChannel> loop_runtime_channel_{nullptr};
-  std::unique_ptr<foxglove::schemas::SceneUpdateChannel> ego_car_channel_{nullptr};
-  std::unique_ptr<foxglove::schemas::SceneUpdateChannel> lane_lines_channel_{nullptr};
-  std::unique_ptr<foxglove::schemas::SceneUpdateChannel> lanelet_scene_channel_{nullptr};
-  std::unique_ptr<foxglove::schemas::SceneUpdateChannel> trajectory_channel_{nullptr};
-  std::unique_ptr<foxglove::schemas::FrameTransformChannel> transform_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> ego_car_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> lanelet_scene_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> reference_line_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> trajectory_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> sampled_channel_{nullptr};
+  std::unique_ptr<FrameTransformChannel> transform_channel_{nullptr};
   std::unique_ptr<foxglove::RawChannel> planning_info_channel_{nullptr};
 };

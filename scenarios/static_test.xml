@@ -681,6 +681,7 @@
         <y>100.0</y>
       </point>
     </rightBound>
+    <successor ref="21"/>
     <predecessor ref="1"/>
     <adjacentLeft ref="5" drivingDir="same"/>
     <laneletType>unknown</laneletType>
@@ -850,6 +851,7 @@
         <y>100.0</y>
       </point>
     </rightBound>
+    <successor ref="22"/>
     <predecessor ref="2"/>
     <adjacentLeft ref="6" drivingDir="same"/>
     <adjacentRight ref="4" drivingDir="same"/>
@@ -1020,6 +1022,7 @@
         <y>100.0</y>
       </point>
     </rightBound>
+    <successor ref="23"/>
     <predecessor ref="3"/>
     <adjacentRight ref="5" drivingDir="same"/>
     <laneletType>unknown</laneletType>
@@ -1189,6 +1192,7 @@
         <y>250.0</y>
       </point>
     </rightBound>
+    <predecessor ref="4"/>
     <adjacentLeft ref="22" drivingDir="same"/>
     <laneletType>unknown</laneletType>
   </lanelet>
@@ -1357,6 +1361,7 @@
         <y>250.0</y>
       </point>
     </rightBound>
+    <predecessor ref="5"/>
     <adjacentLeft ref="23" drivingDir="same"/>
     <adjacentRight ref="21" drivingDir="same"/>
     <laneletType>unknown</laneletType>
@@ -1526,6 +1531,7 @@
         <y>250.0</y>
       </point>
     </rightBound>
+    <predecessor ref="6"/>
     <adjacentRight ref="22" drivingDir="same"/>
     <laneletType>unknown</laneletType>
   </lanelet>
