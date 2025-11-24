@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-23 15:30:47
- * @LastEditTime: 2025-11-23 21:19:56
+ * @LastEditTime: 2025-11-23 23:34:35
  * @FilePath: /mppi-in-autonomous-driving/common/reference_line.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -25,6 +25,9 @@ public:
   size_t size() const { return x_.size(); }
   double length() const { return spline_.s.back(); }
   double accuracy() const { return delta_s_; }
+  const std::vector<double>& get_x() const { return x_; }
+  const std::vector<double>& get_y() const { return y_; }
+  const std::vector<double>& get_yaw() const { return yaw_; }
 
 public:
   std::vector<double> x_;

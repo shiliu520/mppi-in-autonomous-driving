@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-23 22:18:58
+ * @LastEditTime: 2025-11-25 00:16:43
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -73,7 +73,7 @@ Simulator::Simulator() {
         ref_ys.push_back(vertex.y);
       }
     }
-    reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.2);
+    reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.5);
     LOG_INFO(logger_, "Reference line created with {} points, length {:.2f} m",
              reference_line_->size(), reference_line_->length());
   } else {

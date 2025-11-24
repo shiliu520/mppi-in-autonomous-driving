@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-11-23 22:23:53
+ * @LastEditTime: 2025-11-25 00:10:02
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -20,9 +20,15 @@ StochasticOptimizer::StochasticOptimizer(/* args */) {
   new_params.target_velocity = 10.0f;
   new_params.bike_position_coeff = 50.0f;
   new_params.bike_velocity_coeff = 10.0f;
-  new_params.bike_angle_coeff = 100.0f;
-  new_params.accel_effort_coeff = 5.0f;
-  new_params.steer_effort_coeff = 100.0f;
+  new_params.bike_angle_coeff = 75.0f;
+  new_params.accel_effort_coeff = 10.0f;
+  new_params.steer_effort_coeff = 60.0f;
+  new_params.max_accel = 2.0f;
+  new_params.min_accel = -4.0f;
+  new_params.max_steer_angel = 0.18;
+  new_params.min_steer_angel = -0.18;
+  new_params.control_cost_coeff[0] = 20.0;
+  new_params.control_cost_coeff[1] = 120.0;
   trajectory_cost_->setParams(new_params);
 
   float delta_time_ = 0.1;
@@ -58,7 +64,15 @@ StochasticOptimizer::~StochasticOptimizer() {
   delete mppi_controller_;
 }
 
-ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state, const std::shared_ptr<ReferenceLine>& reference_line) {
+ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state,
+                                            const std::shared_ptr<ReferenceLine>& reference_line) {
+  // Update waypoints in trajectory cost function
+  if (reference_line) {
+    trajectory_cost_->setWaypoints(reference_line);
+    // Initialize matched index cache with current vehicle position
+    trajectory_cost_->updateMatchedIndex(_current_state.x, _current_state.y);
+  }
+
   VehicleDynamics::state_array cur_state;
   VehicleDynamics::state_array next_state = dynamics_->getZeroState();
   VehicleDynamics::state_array xdot = dynamics_->getZeroState();
@@ -82,7 +96,7 @@ ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state, con
   target_accel_ = next_state(4);
   target_steer_ = next_state(5);
 
-  return { target_accel_, target_steer_ };
+  return {target_accel_, target_steer_};
 }
 
 Eigen::MatrixXf StochasticOptimizer::get_optimized_trajectory() const {
