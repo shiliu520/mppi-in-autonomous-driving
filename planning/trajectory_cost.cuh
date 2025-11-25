@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-11-25 00:09:14
+ * @LastEditTime: 2025-11-25 23:15:05
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -14,6 +14,13 @@
 #include "vehicle_dynamics.cuh"
 
 #include <cmath>
+
+#ifndef M_PI_F
+#define M_PI_F 3.14159265f
+#endif
+#ifndef M_2PI_F
+#define M_2PI_F 6.28318530f
+#endif
 
 struct TrajectoryCostParams : public CostParams<2> {
   float bike_position_coeff = 3000;
@@ -78,10 +85,14 @@ protected:
   mutable int host_last_matched_idx_ = 0;          // Host-side cache for last matched index
 
   // Helper function to compute distance to reference line (host version)
-  float computeDistanceToReferenceLine(float x, float y, int* nearest_idx = nullptr) const;
+  // Returns distance and optionally outputs nearest index and matched heading
+  float computeDistanceToReferenceLine(float x, float y, int* nearest_idx = nullptr,
+                                       float* matched_heading = nullptr) const;
 
   // Helper function to compute distance to reference line (device version)
-  __device__ float computeDistanceToReferenceLineDevice(float x, float y) const;
+  // Returns distance and outputs matched heading through reference parameter
+  __device__ float computeDistanceToReferenceLineDevice(float x, float y,
+                                                        float& matched_heading) const;
 
   // Common cost computation logic (host version)
   float computeCostInternal(float x, float y, float velocity, float heading, float accel,
@@ -93,8 +104,8 @@ protected:
 };
 
 #ifdef __CUDACC__
-inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(float x,
-                                                                             float y) const {
+inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
+    float x, float y, float& matched_heading) const {
   if (params_.waypoints == nullptr || params_.waypoints_count == 0) {
     return 0.0f;
   }
@@ -176,13 +187,16 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(flo
   // Note: This is safe in device code as each thread has its own trajectory
   const_cast<TrajectoryCostParams&>(params_).last_matched_idx = min_idx;
 
+  matched_heading = params_.waypoints[min_idx].z;
+
   return min_dist;
 }
 
 inline __device__ float TrajectoryCost::computeCostInternalDevice(float x, float y, float velocity,
                                                                   float heading, float accel,
                                                                   float steer) const {
-  float lateral_distance = computeDistanceToReferenceLineDevice(x, y);
+  float matched_heading = 0.0f;
+  float lateral_distance = computeDistanceToReferenceLineDevice(x, y, matched_heading);
 
   float violation = 0.0f;
   if (accel >= params_.max_accel || accel <= params_.min_accel ||
@@ -190,10 +204,18 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float x, float
     violation = 500;
   }
 
+  // Compute heading error (normalize to [-pi, pi])
+  float heading_error = heading - matched_heading;
+  if (heading_error > M_PI_F) {
+    heading_error -= M_2PI_F;
+  } else if (heading_error < -M_PI_F) {
+    heading_error += M_2PI_F;
+  }
+
   const float position_cost = params_.bike_position_coeff * lateral_distance;
   const float velocity_cost =
       params_.bike_velocity_coeff * fabsf(velocity - params_.target_velocity);
-  const float angle_cost = params_.bike_angle_coeff * fabsf(heading);
+  const float angle_cost = params_.bike_angle_coeff * fabsf(heading_error);
   const float accel_cost = params_.accel_effort_coeff * fabsf(accel);
   const float steer_cost = params_.steer_effort_coeff * fabsf(steer);
   return position_cost + velocity_cost + angle_cost + accel_cost + steer_cost + violation;

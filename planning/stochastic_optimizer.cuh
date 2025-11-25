@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:16:24
- * @LastEditTime: 2025-11-23 22:23:11
+ * @LastEditTime: 2025-11-25 23:54:22
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -41,6 +41,6 @@ private:
   
   float target_accel_ = 0.0;
   float target_steer_ = 0.0;
-  float cruise_velocity_ = 10.0;
+  float cruise_velocity_ = 15.0;
   float cost_time_ms_ = 0.0;
 };

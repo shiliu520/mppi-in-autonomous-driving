@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-25 00:16:43
+ * @LastEditTime: 2025-11-26 00:14:14
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -56,9 +56,17 @@ Simulator::Simulator() {
   if (!paths.empty()) {
     std::vector<double> ref_xs;
     std::vector<double> ref_ys;
-    for (const auto& lanelet_id : paths) {
-      LOG_INFO(logger_, "Lanelet ID in routing: {}", lanelet_id);
-      auto lanelet = sim_world_->getRoadNetwork()->findLaneletById(lanelet_id);
+    bool is_lane_change = false;
+    for (size_t idx = 0; idx < paths.size(); ++idx) {
+      auto lanelet = sim_world_->getRoadNetwork()->findLaneletById(paths[idx]);
+      if (idx + 1 < paths.size()) {
+        LOG_INFO(logger_, "Routing lanelet {} -> {}", paths[idx], paths[idx + 1]);
+        auto next_lanelet = sim_world_->getRoadNetwork()->findLaneletById(paths[idx + 1]);
+        if(lanelet_operations::areLaneletsAdjacent(lanelet, next_lanelet)) {
+          is_lane_change = true;
+          continue;
+        }
+      }
       for (const auto& vertex : lanelet->getCenterVertices()) {
         if (ref_xs.size() > 0) {
           const double last_x = ref_xs.back();
@@ -69,16 +77,21 @@ Simulator::Simulator() {
             continue;
           }
         }
+        if (is_lane_change) {
+          is_lane_change = false;
+          continue;
+        }
         ref_xs.push_back(vertex.x);
         ref_ys.push_back(vertex.y);
       }
     }
-    reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.5);
+
+    routing_reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.5);
     LOG_INFO(logger_, "Reference line created with {} points, length {:.2f} m",
-             reference_line_->size(), reference_line_->length());
+             routing_reference_line_->size(), routing_reference_line_->length());
   } else {
     LOG_ERROR(logger_, "No path found from lanelet 2 to 22");
-    reference_line_ = nullptr;
+    routing_reference_line_ = nullptr;
   }
 }
 
@@ -133,7 +146,7 @@ void Simulator::stop() {
 }
 
 void Simulator::simulation_loop() {
-  if (reference_line_) {
+  if (routing_reference_line_) {
     reference_line_channel_->log(get_reference_line_scene_update());
   }
 
@@ -297,6 +310,7 @@ SceneUpdate Simulator::get_trajectory_scene_update(void) const {
   traj_entity.timestamp = TimeUtil::NowTimestamp();
   traj_entity.lifetime = Duration{0, 200000000};
 
+  // #0066BFE5
   Color traj_color = Color{0.0, 0.4, 0.75, 0.9};
   {
     std::shared_lock lock(planning_info_mutex_);
@@ -328,7 +342,9 @@ SceneUpdate Simulator::get_lanelets_scene_update(
   lanelet_entity.lifetime = Duration{0, 0};
 
   auto lane_pose = construct_pose();
+  // #FFFFFFFF
   auto lane_color = Color{1.0, 1.0, 1.0, 1.0};
+  // #E63333FF
   auto road_edge_color = Color{0.9, 0.2, 0.2, 1.0};
   for (const auto& lanelet : lanelets) {
     LOG_INFO(logger_, "Lanelet ID: {}", lanelet->getId());
@@ -429,6 +445,7 @@ SceneUpdate Simulator::get_sampled_scene_update(void) const {
   traj_entity.lifetime = Duration{0, 200000000};
 
   auto traj_pose = construct_pose();
+  // #00CCCCE6
   auto traj_color = Color{0.0, 0.8, 0.8, 0.9};
 
   {
@@ -467,6 +484,7 @@ SceneUpdate Simulator::get_reference_line_scene_update(void) const {
   ref_line_entity.timestamp = TimeUtil::NowTimestamp();
   ref_line_entity.lifetime = Duration{0, 0};
 
+  // #5CD4A8E6
   Color ref_line_color = Color{0.36, 0.83, 0.66, 0.9};
   LinePrimitive ref_line_primitive;
   ref_line_primitive.type = LinePrimitive::LineType::LINE_STRIP;
@@ -476,11 +494,11 @@ SceneUpdate Simulator::get_reference_line_scene_update(void) const {
   ref_line_primitive.color = ref_line_color;
   const double sphere_radius = 0.6 * 2.0;
   Vector3 sphere_size{sphere_radius, sphere_radius, sphere_radius};
-  if (reference_line_) {
-    for (size_t idx = 0; idx < reference_line_->size(); idx += 5) {
+  if (routing_reference_line_) {
+    for (size_t idx = 0; idx < routing_reference_line_->size(); idx += 5) {
       Point3 point;
-      point.x = reference_line_->at(idx).x();
-      point.y = reference_line_->at(idx).y();
+      point.x = routing_reference_line_->at(idx).x();
+      point.y = routing_reference_line_->at(idx).y();
       point.z = 0.0;
       ref_line_primitive.points.emplace_back(point);
       if (idx % 50 == 0) {
@@ -503,5 +521,9 @@ SceneUpdate Simulator::get_reference_line_scene_update(void) const {
 
 std::shared_ptr<ReferenceLine> Simulator::get_reference_line(void) const {
   std::shared_lock lock(reference_line_mutex_);
-  return reference_line_;
+  if (routing_reference_line_) {
+    return routing_reference_line_;
+  }
+
+  return nullptr;
 }

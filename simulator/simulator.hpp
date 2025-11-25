@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-23 22:18:37
+ * @LastEditTime: 2025-11-25 23:18:12
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -61,6 +61,7 @@ private:
   StateInfo ego_state_;
   VehicleInfo vehicle_info_;
   planning::protos::PlanningInfo planning_info_;
+  std::shared_ptr<ReferenceLine> routing_reference_line_{nullptr};
   std::shared_ptr<ReferenceLine> reference_line_{nullptr};
   std::shared_ptr<spdlog::logger> logger_{nullptr};
 
