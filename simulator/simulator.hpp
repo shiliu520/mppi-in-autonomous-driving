@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-25 23:18:12
+ * @LastEditTime: 2025-11-26 22:48:07
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -54,6 +54,7 @@ private:
   SceneUpdate get_trajectory_scene_update(void) const;
   SceneUpdate get_sampled_scene_update(void) const;
   SceneUpdate get_reference_line_scene_update(void) const;
+  SceneUpdate get_obstacle_list_scene_update(void) const;
   SceneUpdate get_lanelets_scene_update(
       const std::vector<std::shared_ptr<Lanelet>>& lanelets) const;
 
@@ -82,6 +83,7 @@ private:
   std::unique_ptr<foxglove::RawChannel> loop_runtime_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> ego_car_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> lanelet_scene_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> obstacle_list_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> reference_line_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> trajectory_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> sampled_channel_{nullptr};

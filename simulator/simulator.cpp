@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-26 00:14:14
+ * @LastEditTime: 2025-11-26 23:49:47
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -62,7 +62,7 @@ Simulator::Simulator() {
       if (idx + 1 < paths.size()) {
         LOG_INFO(logger_, "Routing lanelet {} -> {}", paths[idx], paths[idx + 1]);
         auto next_lanelet = sim_world_->getRoadNetwork()->findLaneletById(paths[idx + 1]);
-        if(lanelet_operations::areLaneletsAdjacent(lanelet, next_lanelet)) {
+        if (lanelet_operations::areLaneletsAdjacent(lanelet, next_lanelet)) {
           is_lane_change = true;
           continue;
         }
@@ -185,11 +185,17 @@ void Simulator::simulation_loop() {
       planning_info_updated_.store(false);
     }
 
-    if (loop_count++ % 250 == 0) {
+    if (loop_count % 250 == 0) {
+      // publish lanelets scene at 0.2 Hz
       lanelet_scene_channel_->log(
           get_lanelets_scene_update(sim_world_->getRoadNetwork()->getLaneletNetwork()));
     }
+    if (loop_count % 5 == 0) {
+      // publish obstacles scene at 10 Hz
+      obstacle_list_channel_->log(get_obstacle_list_scene_update());
+    }
 
+    ++loop_count;
     next_tick += std::chrono::milliseconds(20);
     std::this_thread::sleep_until(next_tick);
   }
@@ -260,6 +266,7 @@ bool Simulator::register_publish_channels(void) {
   trajectory_channel_ = make_channel(SceneUpdateChannel::create("/markers/trajectory"));
   sampled_channel_ = make_channel(SceneUpdateChannel::create("/markers/sampled_trajectories"));
   reference_line_channel_ = make_channel(SceneUpdateChannel::create("/markers/reference_line"));
+  obstacle_list_channel_ = make_channel(SceneUpdateChannel::create("/markers/obstacles"));
   transform_channel_ = make_channel(FrameTransformChannel::create("/transform/map_to_baselink"));
 
   auto descriptor = planning::protos::PlanningInfo::descriptor();
@@ -526,4 +533,76 @@ std::shared_ptr<ReferenceLine> Simulator::get_reference_line(void) const {
   }
 
   return nullptr;
+}
+
+SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
+  static constexpr double kObstacleHeightVRU = 1.7;
+  static constexpr double kObstacleHeightVehicle = 1.6;
+  static constexpr double kObstacleHeightBus = 3.0;
+  static constexpr Color kObstacleColorVRU = {0.22, 0.43, 0.64, 0.8};      // #3A6EA5
+  static constexpr Color kObstacleColorVehicle = {0.83, 0.59, 0.25, 0.8};  // #D4963F
+  static constexpr Color kObstacleColorBus = {0.8, 0.2, 0.2, 0.8};         // #CC3333
+
+  SceneUpdate obstacles_scene_update;
+  auto obstacles = sim_world_->getObstacles();
+  for (const auto& obstacle : obstacles) {
+    double obstacle_length = obstacle->getShapePtr()->getLength();
+    double obstacle_width = obstacle->getShapePtr()->getWidth();
+    double obstacle_heading = obstacle->getCurrentState()->getGlobalOrientation();
+    ObstacleType obstacle_type = obstacle->getObstacleType();
+
+    SceneEntity obstacle_entity;
+    obstacle_entity.id = "obstacle_" + std::to_string(obstacle->getId());
+    obstacle_entity.frame_id = "map";
+    obstacle_entity.timestamp = TimeUtil::NowTimestamp();
+    obstacle_entity.lifetime = Duration{0, 200000000};
+
+    CubePrimitive cube_marker;
+    if (obstacle_type == ObstacleType::pedestrian || obstacle_type == ObstacleType::bicycle ||
+        obstacle_type == ObstacleType::motorcycle || obstacle_type == ObstacleType::vru) {
+      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightVRU};
+      cube_marker.color = kObstacleColorVRU;
+    } else if (obstacle_type == ObstacleType::car || obstacle_type == ObstacleType::vehicle ||
+               obstacle_type == ObstacleType::parked_vehicle) {
+      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightVehicle};
+      cube_marker.color = kObstacleColorVehicle;
+    } else if (obstacle_type == ObstacleType::bus || obstacle_type == ObstacleType::truck) {
+      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightBus};
+      cube_marker.color = kObstacleColorBus;
+    } else {
+      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightVehicle};
+      cube_marker.color = kObstacleColorVehicle;
+    }
+    double half_height = cube_marker.size->z / 2.0;
+    Pose obstacle_pose;
+    obstacle_pose.position = Vector3{obstacle->getCurrentState()->getXPosition(),
+                                     obstacle->getCurrentState()->getYPosition(), half_height};
+    obstacle_pose.orientation = yaw_to_quaternion(obstacle_heading);
+    cube_marker.pose = obstacle_pose;
+    obstacle_entity.cubes.emplace_back(cube_marker);
+
+    TextPrimitive id_text;
+    id_text.text = std::to_string(obstacle->getId());
+    id_text.pose = cube_marker.pose;
+    id_text.color = Color{1.0, 1.0, 1.0, 1.0};
+    id_text.font_size = obstacle_width;
+    obstacle_entity.texts.emplace_back(id_text);
+
+    ArrowPrimitive heading_arrow;
+    heading_arrow.pose = cube_marker.pose;
+    heading_arrow.color = cube_marker.color;
+    heading_arrow.color->a = 1.0;
+    heading_arrow.shaft_length = 1.6;
+    heading_arrow.head_length = 0.7;
+    heading_arrow.shaft_diameter = 0.3;
+    heading_arrow.head_diameter = 0.6;
+    double half_length = cube_marker.size->x / 2.0;
+    heading_arrow.pose->position->x += (half_length * std::cos(obstacle_heading));
+    heading_arrow.pose->position->y += (half_length * std::sin(obstacle_heading));
+    obstacle_entity.arrows.emplace_back(heading_arrow);
+
+    obstacles_scene_update.entities.emplace_back(obstacle_entity);
+  }
+
+  return obstacles_scene_update;
 }

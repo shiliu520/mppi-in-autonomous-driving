@@ -1563,6 +1563,62 @@
       </orientation>
     </initialState>
   </staticObstacle>
+  <staticObstacle id="105">
+    <type>bus</type>
+    <shape>
+      <rectangle>
+        <length>10.108</length>
+        <width>2.53</width>
+        <orientation>0.0</orientation>
+        <center>
+          <x>0.0</x>
+          <y>0.0</y>
+        </center>
+      </rectangle>
+    </shape>
+    <initialState>
+      <time>
+        <exact>1</exact>
+      </time>
+      <position>
+        <point>
+          <x>275</x>
+          <y>0</y>
+        </point>
+      </position>
+      <orientation>
+        <exact>0.0</exact>
+      </orientation>
+    </initialState>
+  </staticObstacle>
+  <staticObstacle id="127">
+    <type>bus</type>
+    <shape>
+      <rectangle>
+        <length>10.508</length>
+        <width>2.51</width>
+        <orientation>0.0</orientation>
+        <center>
+          <x>0.0</x>
+          <y>0.0</y>
+        </center>
+      </rectangle>
+    </shape>
+    <initialState>
+      <time>
+        <exact>1</exact>
+      </time>
+      <position>
+        <point>
+          <x>160.0</x>
+          <y>6.4</y>
+        </point>
+      </position>
+      <orientation>
+        <exact>0.0</exact>
+      </orientation>
+    </initialState>
+  </staticObstacle>
   <planningProblem id="1">
     <initialState>
       <time>

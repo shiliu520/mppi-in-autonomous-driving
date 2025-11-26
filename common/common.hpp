@@ -2,7 +2,7 @@
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:18:52
  * @LastEditors: Please set LastEditors
- * @LastEditTime: 2025-11-22 21:04:07
+ * @LastEditTime: 2025-11-26 23:58:38
  * @FilePath: /mppi-in-autonomous-driving/common/common.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -50,6 +50,14 @@ struct VehicleInfo {
   double width;
   double length;
   double wheel_base;
+};
+
+struct PathPoint {
+  double x;
+  double y;
+  double yaw;
+  double v;
+  double t;
 };
 
 class TimeUtil {
