@@ -29,8 +29,9 @@ int main(int argc, char** argv) {
   auto next_tick = main_thread_start;
   while (!done) {
     auto ego_state = simulator.get_ego_state();
-    std::shared_ptr<ReferenceLine> reference_line = simulator.get_reference_line();
-    auto control_input = optimizer.plan_once(ego_state, reference_line);
+    auto reference_line = simulator.get_reference_line();
+    auto obstacle_list = simulator.get_obstacle_list();
+    auto control_input = optimizer.plan_once(ego_state, reference_line, obstacle_list);
     auto planning_info = optimizer.get_debug_result(ego_state);
     simulator.set_ego_control_input(control_input);
     simulator.update_planning_info(planning_info);

@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-26 23:49:47
+ * @LastEditTime: 2025-11-27 22:51:42
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -52,7 +52,7 @@ Simulator::Simulator() {
 
   const std::shared_ptr<LaneletGraph>& topo_graph =
       sim_world_->getRoadNetwork()->getTopologicalMap();
-  auto paths = topo_graph->findPaths(2, 22, true);
+  auto paths = topo_graph->findPaths(1, 22, true);
   if (!paths.empty()) {
     std::vector<double> ref_xs;
     std::vector<double> ref_ys;
@@ -605,4 +605,19 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
   }
 
   return obstacles_scene_update;
+}
+
+std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
+  auto obstacle_list = std::make_shared<common::ObstacleList>();
+  auto obstacles = sim_world_->getObstacles();
+  for (const auto& obstacle : obstacles) {
+    common::Obstacle obs;
+    obs.set_id(std::to_string(obstacle->getId()));
+    obs.set_type(static_cast<common::ObstacleType>(obstacle->getObstacleType()));
+    obs.set_x(obstacle->getCurrentState()->getXPosition());
+    obs.set_y(obstacle->getCurrentState()->getYPosition());
+    obs.set_heading(obstacle->getCurrentState()->getGlobalOrientation());
+    obstacle_list->append(obs);
+  }
+  return obstacle_list;
 }

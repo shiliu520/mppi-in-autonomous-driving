@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-26 22:48:07
+ * @LastEditTime: 2025-11-28 00:13:02
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -9,6 +9,7 @@
 #pragma once
 
 #include "common/common.hpp"
+#include "common/obstacle.hpp"
 #include "common/reference_line.hpp"
 #include "common/protos/planning_info.pb.h"
 #include "commonroad_cpp/interfaces/commonroad/input_utils.h"
@@ -45,6 +46,7 @@ public:
   void set_ego_control_input(const ControlInput& input);
   void update_planning_info(const planning::protos::PlanningInfo& info);
   std::shared_ptr<ReferenceLine> get_reference_line(void) const;
+  std::shared_ptr<common::ObstacleList> get_obstacle_list(void) const;
 
 private:
   void simulation_loop(void);

@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-11-26 00:08:13
+ * @LastEditTime: 2025-11-27 23:51:32
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -18,7 +18,7 @@ StochasticOptimizer::StochasticOptimizer(/* args */) {
   trajectory_cost_ = new TrajectoryCost;
   TrajectoryCostParams new_params;
   new_params.target_velocity = cruise_velocity_;
-  new_params.bike_position_coeff = 60.0f;
+  new_params.bike_position_coeff = 12.5f;
   new_params.bike_velocity_coeff = 10.0f;
   new_params.bike_angle_coeff = 75.0f;
   new_params.accel_effort_coeff = 10.0f;
@@ -64,13 +64,19 @@ StochasticOptimizer::~StochasticOptimizer() {
   delete mppi_controller_;
 }
 
-ControlInput StochasticOptimizer::plan_once(const StateInfo& _current_state,
-                                            const std::shared_ptr<ReferenceLine>& reference_line) {
+ControlInput StochasticOptimizer::plan_once(
+    const StateInfo& _current_state, const std::shared_ptr<ReferenceLine>& reference_line,
+    const std::shared_ptr<common::ObstacleList>& obstacle_list) {
   // Update waypoints in trajectory cost function
   if (reference_line) {
     trajectory_cost_->setWaypoints(reference_line);
     // Initialize matched index cache with current vehicle position
     trajectory_cost_->updateMatchedIndex(_current_state.x, _current_state.y);
+  }
+
+  // Update obstacles in trajectory cost function
+  if (obstacle_list) {
+    trajectory_cost_->setObstacles(obstacle_list);
   }
 
   VehicleDynamics::state_array cur_state;

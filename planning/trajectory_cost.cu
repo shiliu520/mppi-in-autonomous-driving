@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-11-25 23:15:34
+ * @LastEditTime: 2025-11-28 00:50:21
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -67,6 +67,95 @@ void TrajectoryCost::setWaypoints(const std::shared_ptr<ReferenceLine>& waypoint
   }
 }
 
+void TrajectoryCost::setObstacles(const std::shared_ptr<common::ObstacleList>& obstacle_list) {
+  host_obstacles_ = obstacle_list;
+
+  // Free old device memory if exists
+  if (device_obstacles_) {
+    // Free trajectory arrays first
+    for (auto& traj_ptr : device_trajectories_) {
+      if (traj_ptr) {
+        cudaFree(traj_ptr);
+      }
+    }
+    device_trajectories_.clear();
+
+    cudaFree(device_obstacles_);
+    device_obstacles_ = nullptr;
+  }
+
+  if (obstacle_list && !obstacle_list->obstacles().empty()) {
+    const auto& obstacles = obstacle_list->obstacles();
+    size_t num_obstacles = obstacles.size();
+
+    // Convert Obstacle data to ObstacleGPU struct array
+    std::vector<ObstacleGPU> temp_obstacles(num_obstacles);
+    device_trajectories_.resize(num_obstacles, nullptr);
+
+    for (size_t i = 0; i < num_obstacles; ++i) {
+      const auto& obs = obstacles[i];
+
+      temp_obstacles[i].x = static_cast<float>(obs.x());
+      temp_obstacles[i].y = static_cast<float>(obs.y());
+      temp_obstacles[i].width = static_cast<float>(obs.width());
+      temp_obstacles[i].length = static_cast<float>(obs.length());
+      temp_obstacles[i].heading = static_cast<float>(obs.heading());
+      temp_obstacles[i].type = static_cast<float>(obs.type());
+      temp_obstacles[i].is_static = obs.is_static() ? 1.0f : 0.0f;
+
+      // Handle future trajectory if available
+      const auto& prediction = obs.prediction();
+      if (!prediction.empty()) {
+        // Allocate device memory for this obstacle's trajectory
+        size_t traj_size = prediction.size() * sizeof(float3);
+        cudaMalloc((void**)&device_trajectories_[i], traj_size);
+
+        // Convert PathPoint to float3 [x, y, heading]
+        std::vector<float3> traj_data(prediction.size());
+        for (size_t j = 0; j < prediction.size(); ++j) {
+          traj_data[j].x = static_cast<float>(prediction[j].x);
+          traj_data[j].y = static_cast<float>(prediction[j].y);
+          traj_data[j].z = static_cast<float>(prediction[j].yaw);
+        }
+
+        // Copy trajectory to device
+        cudaMemcpyAsync(device_trajectories_[i], traj_data.data(), traj_size,
+                        cudaMemcpyHostToDevice, stream_);
+
+        temp_obstacles[i].future_traj = device_trajectories_[i];
+        temp_obstacles[i].traj_len = static_cast<int>(prediction.size());
+      } else {
+        temp_obstacles[i].future_traj = nullptr;
+        temp_obstacles[i].traj_len = 0;
+      }
+      temp_obstacles[i].reserved = 0;
+    }
+
+    // Allocate device memory for obstacle array
+    size_t obstacles_size = num_obstacles * sizeof(ObstacleGPU);
+    cudaMalloc((void**)&device_obstacles_, obstacles_size);
+
+    // Copy obstacles to device
+    cudaMemcpyAsync(device_obstacles_, temp_obstacles.data(), obstacles_size,
+                    cudaMemcpyHostToDevice, stream_);
+
+    // Update params with device pointer
+    params_.obstacle_list.obstacles = device_obstacles_;
+    params_.obstacle_list.count = static_cast<int>(num_obstacles);
+
+    // Synchronize to ensure copy is complete
+    cudaStreamSynchronize(stream_);
+  } else {
+    params_.obstacle_list.obstacles = nullptr;
+    params_.obstacle_list.count = 0;
+  }
+
+  // Update params on device if GPU is already setup
+  if (GPUMemStatus_) {
+    paramsToDevice();
+  }
+}
+
 void TrajectoryCost::updateMatchedIndex(float x, float y) {
   if (!host_waypoints_ || host_waypoints_->size() == 0) {
     return;
@@ -99,6 +188,20 @@ void TrajectoryCost::freeCudaMem() {
   if (device_waypoints_) {
     cudaFree(device_waypoints_);
     device_waypoints_ = nullptr;
+  }
+
+  // Free obstacles device memory
+  if (device_obstacles_) {
+    // Free trajectory arrays first
+    for (auto& traj_ptr : device_trajectories_) {
+      if (traj_ptr) {
+        cudaFree(traj_ptr);
+      }
+    }
+    device_trajectories_.clear();
+
+    cudaFree(device_obstacles_);
+    device_obstacles_ = nullptr;
   }
 
   // Call base class cleanup
@@ -209,7 +312,7 @@ float TrajectoryCost::computeCostInternal(float x, float y, float velocity, floa
 
   float violation = 0.0f;
   if (accel >= params_.max_accel || accel <= params_.min_accel ||
-      steer >= params_.max_steer_angel || steer <= params_.min_steer_angel) {
+      steer >= params_.max_steer_angel || steer <= params_.min_steer_angel || velocity < 0) {
     violation = 500;
   }
 
@@ -221,12 +324,18 @@ float TrajectoryCost::computeCostInternal(float x, float y, float velocity, floa
     heading_error += 2.0f * M_PI;
   }
 
+  // Compute obstacle collision cost (assuming vehicle dimensions)
+  const float vehicle_width = 2.0f;   // TODO: make this configurable
+  const float vehicle_length = 4.5f;  // TODO: make this configurable
+  float obstacle_cost = computeObstacleCost(x, y, heading, vehicle_width, vehicle_length);
+
   float position_cost = params_.bike_position_coeff * lateral_distance;
   float velocity_cost = params_.bike_velocity_coeff * std::abs(velocity - params_.target_velocity);
   float angle_cost = params_.bike_angle_coeff * std::abs(heading_error);
   float accel_cost = params_.accel_effort_coeff * std::abs(accel);
   float steer_cost = params_.steer_effort_coeff * std::abs(steer);
-  return position_cost + velocity_cost + angle_cost + accel_cost + steer_cost + violation;
+  return position_cost + velocity_cost + angle_cost + accel_cost + steer_cost + obstacle_cost +
+         violation;
 }
 
 float TrajectoryCost::computeStateCost(const Eigen::Ref<const output_array> s, int timestep,
@@ -242,4 +351,37 @@ float TrajectoryCost::computeControlCost(const Eigen::Ref<const control_array> u
                                          int* crash) {
   return params_.control_cost_coeff[0] * std::abs(u[0]) +
          params_.control_cost_coeff[1] * std::abs(u[1]);
+}
+
+float TrajectoryCost::computeObstacleCost(float x, float y, float heading, float vehicle_width,
+                                          float vehicle_length) const {
+  if (!host_obstacles_ || host_obstacles_->obstacles().empty()) {
+    return 0.0f;
+  }
+
+  float total_cost = 0.0f;
+  const auto& obstacles = host_obstacles_->obstacles();
+
+  for (const auto& obs : obstacles) {
+    // Current obstacle position cost
+    const float obs_x = static_cast<float>(obs.x());
+    const float obs_y = static_cast<float>(obs.y());
+
+    float dist = std::hypot(x - obs_x, y - obs_y);
+    if (dist < 3.0f) {
+      total_cost += 1000.0f;
+      if (y > 0) {
+        total_cost -= 700.0f;  // Bias to encourage passing on one side
+      }
+    }
+
+    // Future trajectory cost (if available)
+    const auto& prediction = obs.prediction();
+    if (!prediction.empty()) {
+      // TODO: Add temporal collision checking with predicted trajectory
+      // This allows checking collision at future timesteps along the prediction horizon
+    }
+  }
+
+  return total_cost;
 }
