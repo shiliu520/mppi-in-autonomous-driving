@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-11-27 23:51:32
+ * @LastEditTime: 2025-11-29 00:54:37
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -10,23 +10,23 @@
 
 StochasticOptimizer::StochasticOptimizer(/* args */) {
   dynamics_ = new VehicleDynamics(2.8);
-  dynamics_->control_rngs_[0].x = -1.5;    // min jerk
-  dynamics_->control_rngs_[0].y = 1.5;     // max jerk
-  dynamics_->control_rngs_[1].x = -0.07;   // min steering rate
-  dynamics_->control_rngs_[1].y = 0.07;    // max steering rate
+  dynamics_->control_rngs_[0].x = -1.5;   // min jerk
+  dynamics_->control_rngs_[0].y = 1.5;    // max jerk
+  dynamics_->control_rngs_[1].x = -0.07;  // min steering rate
+  dynamics_->control_rngs_[1].y = 0.07;   // max steering rate
 
   trajectory_cost_ = new TrajectoryCost;
   TrajectoryCostParams new_params;
   new_params.target_velocity = cruise_velocity_;
-  new_params.bike_position_coeff = 12.5f;
-  new_params.bike_velocity_coeff = 10.0f;
-  new_params.bike_angle_coeff = 75.0f;
+  new_params.position_coeff = 15.0f;
+  new_params.velocity_coeff = 10.0f;
+  new_params.angle_coeff = 75.0f;
   new_params.accel_effort_coeff = 10.0f;
   new_params.steer_effort_coeff = 80.0f;
   new_params.max_accel = 2.0f;
   new_params.min_accel = -4.0f;
-  new_params.max_steer_angel = 0.15;
-  new_params.min_steer_angel = -0.15;
+  new_params.max_steer_angle = 0.15;
+  new_params.min_steer_angle = -0.15;
   new_params.control_cost_coeff[0] = 20.0;
   new_params.control_cost_coeff[1] = 120.0;
   trajectory_cost_->setParams(new_params);

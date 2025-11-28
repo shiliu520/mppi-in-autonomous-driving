@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-27 22:51:42
+ * @LastEditTime: 2025-11-28 23:35:07
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -610,12 +610,22 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
 std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
   auto obstacle_list = std::make_shared<common::ObstacleList>();
   auto obstacles = sim_world_->getObstacles();
+  StateInfo current_ego_state = get_ego_state();
+
   for (const auto& obstacle : obstacles) {
+    const double obstacle_x = obstacle->getCurrentState()->getXPosition();
+    const double obstacle_y = obstacle->getCurrentState()->getYPosition();
+    double distance_to_ego =
+        std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
+    if (distance_to_ego > 100.0) {
+      continue;
+    }
+
     common::Obstacle obs;
     obs.set_id(std::to_string(obstacle->getId()));
     obs.set_type(static_cast<common::ObstacleType>(obstacle->getObstacleType()));
-    obs.set_x(obstacle->getCurrentState()->getXPosition());
-    obs.set_y(obstacle->getCurrentState()->getYPosition());
+    obs.set_x(obstacle_x);
+    obs.set_y(obstacle_y);
     obs.set_heading(obstacle->getCurrentState()->getGlobalOrientation());
     obstacle_list->append(obs);
   }

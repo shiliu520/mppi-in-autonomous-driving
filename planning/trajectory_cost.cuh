@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-11-28 00:50:25
+ * @LastEditTime: 2025-11-29 00:54:32
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -22,17 +22,16 @@
 #ifndef M_2PI_F
 #define M_2PI_F 6.28318530f
 #endif
-#ifndef SQ
-#define SQ(x) ((x) * (x))
-#endif
+
+#define S_IDX(name) S_IND_CLASS(VehicleDynamicsParams, name)
 
 // GPU-friendly obstacle representation (POD type)
 struct ObstacleGPU {
   float x, y;           // Center position
   float width, length;  // Dimensions
   float heading;        // Orientation in radians
-  float type;           // ObstacleType as float for GPU compatibility
-  float is_static;      // 1.0f for static, 0.0f for dynamic
+  int type;             // ObstacleType as float for GPU compatibility
+  bool is_static;       // true for static, false for dynamic
 
   float3* future_traj;  // Device pointer to predicted trajectory [x, y, heading]
   int traj_len;         // Number of future trajectory points
@@ -46,20 +45,20 @@ struct ObstacleListGPU {
 };
 
 struct TrajectoryCostParams : public CostParams<2> {
-  float bike_position_coeff = 3000;
-  float bike_velocity_coeff = 500;
-  float bike_angle_coeff = 5000;
+  float position_coeff = 3000;
+  float velocity_coeff = 500;
+  float angle_coeff = 5000;
   float accel_effort_coeff = 100.0f;
   float steer_effort_coeff = 3000.0f;
   float target_velocity = 10.0f;
   float max_accel = 5;
   float min_accel = -5;
-  float max_steer_angel = 0.20;
-  float min_steer_angel = -0.20;
+  float max_steer_angle = 0.20;
+  float min_steer_angle = -0.20;
   float vehicle_width = 2.0f;
   float vehicle_length = 4.5f;
-  float vehicle_wheelbase = 2.5f;
-  float safety_margin = 0.8f;
+  float wheelbase = 2.5f;
+  float safety_margin = 1.5f;
 
   // Device-side waypoints data
   float3* waypoints = nullptr;  // Device pointer to waypoints array
@@ -132,20 +131,23 @@ protected:
                                                         float& matched_heading) const;
 
   // Common cost computation logic (host version)
-  float computeCostInternal(float x, float y, float velocity, float heading, float accel,
-                            float steer) const;
+  float computeCostInternal(const Eigen::Ref<const output_array> s) const;
 
   // Common cost computation logic (device version)
-  __device__ float computeCostInternalDevice(float x, float y, float velocity, float heading,
-                                             float accel, float steer) const;
+  __device__ float computeCostInternalDevice(float* state) const;
 
   // Helper function to check collision with obstacles (host version)
-  float computeObstacleCost(float x, float y, float heading, float vehicle_width,
-                            float vehicle_length) const;
+  float computeObstacleCost(float x, float y, float heading) const;
 
   // Helper function to check collision with obstacles (device version)
-  __device__ float computeObstacleCostDevice(float x, float y, float heading, float vehicle_width,
-                                             float vehicle_length) const;
+  __device__ float computeObstacleCostDevice(float x, float y, float heading) const;
+
+  float computeSafetyMargin(const Eigen::Vector2f& ego_position,
+                            const Eigen::Vector3f& obstacle_pose,
+                            const Eigen::Vector2f& ellipse_axes) const;
+
+  __device__ float computeSafetyMargin(float2 ego_position, float3 obstacle_pose,
+                                       float2 ellipse_axes) const;
 };
 
 #ifdef __CUDACC__
@@ -160,13 +162,9 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
   float min_dist = 1e6f;
   int min_idx = cached_idx;
 
-  // Local search window size (tune based on your dynamics and dt)
-  // Assuming max velocity ~30m/s and dt=0.1s, vehicle moves ~3m per step
-  // With waypoint spacing ~0.2m, need to check ~15 points forward
-  const int local_window = 30;  // Search ±30 points around cached_idx
-
+  const int local_window = 10;
   // Local search: only check nearby points for temporal continuity
-  int search_start = max(0, cached_idx - 5);
+  int search_start = max(0, cached_idx - 2);
   int search_end = min(n - 1, cached_idx + local_window);
   if (cached_idx == 0) {
     // If no cache, search the whole range
@@ -237,15 +235,20 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
   return min_dist;
 }
 
-inline __device__ float TrajectoryCost::computeCostInternalDevice(float x, float y, float velocity,
-                                                                  float heading, float accel,
-                                                                  float steer) const {
+inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state) const {
+  float x = state[S_IDX(POS_X)];
+  float y = state[S_IDX(POS_Y)];
+  float velocity = state[S_IDX(VELOCITY)];
+  float heading = state[S_IDX(YAW)];
+  float accel = state[S_IDX(ACCEL)];
+  float steer = state[S_IDX(STEER)];
+
   float matched_heading = 0.0f;
   float lateral_distance = computeDistanceToReferenceLineDevice(x, y, matched_heading);
 
   float violation = 0.0f;
   if (accel >= params_.max_accel || accel <= params_.min_accel ||
-      steer >= params_.max_steer_angel || steer <= params_.min_steer_angel || velocity < 0) {
+      steer >= params_.max_steer_angle || steer <= params_.min_steer_angle || velocity < -0.0001f) {
     violation = 500;
   }
 
@@ -258,15 +261,11 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float x, float
   }
 
   // Compute obstacle collision cost (assuming vehicle dimensions)
-  const float vehicle_width = 2.0f;   // TODO: make this configurable
-  const float vehicle_length = 4.5f;  // TODO: make this configurable
-  const float obstacle_cost =
-      computeObstacleCostDevice(x, y, heading, vehicle_width, vehicle_length);
+  const float obstacle_cost = computeObstacleCostDevice(x, y, heading);
 
-  const float position_cost = params_.bike_position_coeff * lateral_distance;
-  const float velocity_cost =
-      params_.bike_velocity_coeff * fabsf(velocity - params_.target_velocity);
-  const float angle_cost = params_.bike_angle_coeff * fabsf(heading_error);
+  const float position_cost = params_.position_coeff * lateral_distance;
+  const float velocity_cost = params_.velocity_coeff * fabsf(velocity - params_.target_velocity);
+  const float angle_cost = params_.angle_coeff * fabsf(heading_error);
   const float accel_cost = params_.accel_effort_coeff * fabsf(accel);
   const float steer_cost = params_.steer_effort_coeff * fabsf(steer);
   return position_cost + velocity_cost + angle_cost + accel_cost + steer_cost + obstacle_cost +
@@ -279,12 +278,12 @@ inline __device__ float TrajectoryCost::computeStateCost(float* s, int timestep,
   (void)theta_c;
   (void)crash_status;
 
-  return computeCostInternalDevice(s[0], s[1], s[2], s[3], s[4], s[5]);
+  return computeCostInternalDevice(s);
 }
 
 inline __device__ float TrajectoryCost::terminalCost(float* s, float* theta_c) {
   (void)theta_c;
-  return computeCostInternalDevice(s[0], s[1], s[2], s[3], s[4], s[5]);
+  return computeCostInternalDevice(s);
 }
 
 inline __device__ float TrajectoryCost::computeControlCost(float* u, int timestep, float* theta_c,
@@ -292,25 +291,50 @@ inline __device__ float TrajectoryCost::computeControlCost(float* u, int timeste
   return params_.control_cost_coeff[0] * fabsf(u[0]) + params_.control_cost_coeff[1] * fabsf(u[1]);
 }
 
-inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float y, float heading,
-                                                                  float vehicle_width,
-                                                                  float vehicle_length) const {
+inline __device__ float TrajectoryCost::computeSafetyMargin(float2 ego_position,
+                                                            float3 obstacle_pose,
+                                                            float2 ellipse_axes) const {
+  const float diff_x = obstacle_pose.x - ego_position.x;
+  const float diff_y = obstacle_pose.y - ego_position.y;
+  const float cos_heading = __cosf(obstacle_pose.z);
+  const float sin_heading = __sinf(obstacle_pose.z);
+
+  // Rotate the difference into the obstacle's frame
+  float rotated_x = diff_x * cos_heading + diff_y * sin_heading;
+  float rotated_y = -diff_x * sin_heading + diff_y * cos_heading;
+  // Compute normalized distance in ellipse frame
+  float norm = (rotated_x * rotated_x) / (ellipse_axes.x * ellipse_axes.x) +
+               (rotated_y * rotated_y) / (ellipse_axes.y * ellipse_axes.y);
+
+  // Safety margin is how far inside the ellipse we are (positive if outside)
+  return norm - 1.0f;
+}
+
+inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float y,
+                                                                  float heading) const {
   if (params_.obstacle_list.obstacles == nullptr || params_.obstacle_list.count == 0) {
     return 0.0f;
   }
 
   float total_cost = 0.0f;
+  const float wheelbase = params_.wheelbase;
+  float2 ego_rear{x, y};
+  float2 ego_front{x + wheelbase * __cosf(heading), y + wheelbase * __sinf(heading)};
 
   // Iterate through all obstacles
   for (int i = 0; i < params_.obstacle_list.count; ++i) {
     const ObstacleGPU& obs = params_.obstacle_list.obstacles[i];
 
-    float dist = sqrtf(SQ(x - obs.x) + SQ(y - obs.y));
-    if (dist < 3.0f) {
-      total_cost += 1000.0f;
-      if (y > 0) {
-        total_cost -= 700.0f;  // Bias to encourage passing on one side
-      }
+    float3 obs_pos{obs.x, obs.y, obs.heading};
+    float ellipse_a = 0.5 * obs.length + params_.safety_margin * 5 + params_.vehicle_width / 2;
+    float ellipse_b = 0.5 * obs.width + params_.safety_margin + params_.vehicle_width / 2;
+    float2 ellipse_axes{ellipse_a, ellipse_b};
+
+    float norm_front = computeSafetyMargin(ego_front, obs_pos, ellipse_axes);
+    float norm_rear = computeSafetyMargin(ego_rear, obs_pos, ellipse_axes);
+
+    if (norm_front <= 0 || norm_rear <= 0) {
+      total_cost += 750.0f;
     }
 
     // Future trajectory cost (if available)

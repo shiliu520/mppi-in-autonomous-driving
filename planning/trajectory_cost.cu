@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-11-28 00:50:21
+ * @LastEditTime: 2025-11-29 00:54:24
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -100,8 +100,8 @@ void TrajectoryCost::setObstacles(const std::shared_ptr<common::ObstacleList>& o
       temp_obstacles[i].width = static_cast<float>(obs.width());
       temp_obstacles[i].length = static_cast<float>(obs.length());
       temp_obstacles[i].heading = static_cast<float>(obs.heading());
-      temp_obstacles[i].type = static_cast<float>(obs.type());
-      temp_obstacles[i].is_static = obs.is_static() ? 1.0f : 0.0f;
+      temp_obstacles[i].type = static_cast<int>(obs.type());
+      temp_obstacles[i].is_static = obs.is_static();
 
       // Handle future trajectory if available
       const auto& prediction = obs.prediction();
@@ -222,8 +222,8 @@ float TrajectoryCost::computeDistanceToReferenceLine(float x, float y, int* near
   int min_idx = host_last_matched_idx_;
 
   // Local search window (same as device version)
-  const int local_window = 30;
-  int search_start = std::max(0, host_last_matched_idx_ - 5);
+  const int local_window = 10;
+  int search_start = std::max(0, host_last_matched_idx_ - 2);
   int search_end = std::min(static_cast<int>(n) - 1, host_last_matched_idx_ + local_window);
   if (host_last_matched_idx_ == 0) {
     // If no cache, search the whole range
@@ -300,10 +300,15 @@ float TrajectoryCost::computeDistanceToReferenceLine(float x, float y, int* near
   return min_dist;
 }
 
-float TrajectoryCost::computeCostInternal(float x, float y, float velocity, float heading,
-                                          float accel, float steer) const {
+float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s) const {
   float lateral_distance = 0.0f;
   float matched_heading = 0.0f;
+  const float x = s(S_IDX(POS_X));
+  const float y = s(S_IDX(POS_Y));
+  const float velocity = s(S_IDX(VELOCITY));
+  const float heading = s(S_IDX(YAW));
+  const float accel = s(S_IDX(ACCEL));
+  const float steer = s(S_IDX(STEER));
 
   // Compute distance to reference line if waypoints are available
   if (host_waypoints_ && host_waypoints_->size() > 0) {
@@ -312,7 +317,7 @@ float TrajectoryCost::computeCostInternal(float x, float y, float velocity, floa
 
   float violation = 0.0f;
   if (accel >= params_.max_accel || accel <= params_.min_accel ||
-      steer >= params_.max_steer_angel || steer <= params_.min_steer_angel || velocity < 0) {
+      steer >= params_.max_steer_angle || steer <= params_.min_steer_angle || velocity < -0.0001f) {
     violation = 500;
   }
 
@@ -325,13 +330,11 @@ float TrajectoryCost::computeCostInternal(float x, float y, float velocity, floa
   }
 
   // Compute obstacle collision cost (assuming vehicle dimensions)
-  const float vehicle_width = 2.0f;   // TODO: make this configurable
-  const float vehicle_length = 4.5f;  // TODO: make this configurable
-  float obstacle_cost = computeObstacleCost(x, y, heading, vehicle_width, vehicle_length);
+  float obstacle_cost = computeObstacleCost(x, y, heading);
 
-  float position_cost = params_.bike_position_coeff * lateral_distance;
-  float velocity_cost = params_.bike_velocity_coeff * std::abs(velocity - params_.target_velocity);
-  float angle_cost = params_.bike_angle_coeff * std::abs(heading_error);
+  float position_cost = params_.position_coeff * lateral_distance;
+  float velocity_cost = params_.velocity_coeff * std::abs(velocity - params_.target_velocity);
+  float angle_cost = params_.angle_coeff * std::abs(heading_error);
   float accel_cost = params_.accel_effort_coeff * std::abs(accel);
   float steer_cost = params_.steer_effort_coeff * std::abs(steer);
   return position_cost + velocity_cost + angle_cost + accel_cost + steer_cost + obstacle_cost +
@@ -340,11 +343,11 @@ float TrajectoryCost::computeCostInternal(float x, float y, float velocity, floa
 
 float TrajectoryCost::computeStateCost(const Eigen::Ref<const output_array> s, int timestep,
                                        int* crash_status) {
-  return computeCostInternal(s(0), s(1), s(2), s(3), s(4), s(5));
+  return computeCostInternal(s);
 }
 
 float TrajectoryCost::terminalCost(const Eigen::Ref<const output_array> s) {
-  return computeCostInternal(s(0), s(1), s(2), s(3), s(4), s(5));
+  return computeCostInternal(s);
 }
 
 float TrajectoryCost::computeControlCost(const Eigen::Ref<const control_array> u, int timestep,
@@ -353,26 +356,28 @@ float TrajectoryCost::computeControlCost(const Eigen::Ref<const control_array> u
          params_.control_cost_coeff[1] * std::abs(u[1]);
 }
 
-float TrajectoryCost::computeObstacleCost(float x, float y, float heading, float vehicle_width,
-                                          float vehicle_length) const {
+float TrajectoryCost::computeObstacleCost(float x, float y, float heading) const {
   if (!host_obstacles_ || host_obstacles_->obstacles().empty()) {
     return 0.0f;
   }
 
   float total_cost = 0.0f;
+  const float wheelbase = params_.wheelbase;
   const auto& obstacles = host_obstacles_->obstacles();
+  Eigen::Vector2f ego_rear(x, y);
+  Eigen::Vector2f ego_front(x + wheelbase * std::cos(heading), y + wheelbase * std::sin(heading));
 
   for (const auto& obs : obstacles) {
-    // Current obstacle position cost
-    const float obs_x = static_cast<float>(obs.x());
-    const float obs_y = static_cast<float>(obs.y());
+    Eigen::Vector3f obstacle_pose(obs.x(), obs.y(), obs.heading());
+    float ellipse_a = 0.5 * obs.length() + params_.safety_margin * 5 + params_.vehicle_width / 2;
+    float ellipse_b = 0.5 * obs.width() + params_.safety_margin + params_.vehicle_width / 2;
+    Eigen::Vector2f ellipse_axes(ellipse_a, ellipse_b);
 
-    float dist = std::hypot(x - obs_x, y - obs_y);
-    if (dist < 3.0f) {
-      total_cost += 1000.0f;
-      if (y > 0) {
-        total_cost -= 700.0f;  // Bias to encourage passing on one side
-      }
+    float norm_front = computeSafetyMargin(ego_front, obstacle_pose, ellipse_axes);
+    float norm_rear = computeSafetyMargin(ego_rear, obstacle_pose, ellipse_axes);
+
+    if (norm_front <= 0 || norm_rear <= 0) {
+      total_cost += 750.0f;
     }
 
     // Future trajectory cost (if available)
@@ -384,4 +389,20 @@ float TrajectoryCost::computeObstacleCost(float x, float y, float heading, float
   }
 
   return total_cost;
+}
+
+float TrajectoryCost::computeSafetyMargin(const Eigen::Vector2f& ego_position,
+                                          const Eigen::Vector3f& obstacle_pose,
+                                          const Eigen::Vector2f& ellipse_axes) const {
+  const float diff_x = obstacle_pose.x() - ego_position.x();
+  const float diff_y = obstacle_pose.y() - ego_position.y();
+  const float cos_heading = std::cos(obstacle_pose.z());
+  const float sin_heading = std::sin(obstacle_pose.z());
+
+  float rotated_x = diff_x * cos_heading + diff_y * sin_heading;
+  float rotated_y = -diff_x * sin_heading + diff_y * cos_heading;
+  float norm = (rotated_x * rotated_x) / (ellipse_axes.x() * ellipse_axes.x()) +
+               (rotated_y * rotated_y) / (ellipse_axes.y() * ellipse_axes.y());
+
+  return norm - 1.0f;
 }
