@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-11-29 00:54:24
+ * @LastEditTime: 2025-11-29 21:16:52
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -329,7 +329,6 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
     heading_error += 2.0f * M_PI;
   }
 
-  // Compute obstacle collision cost (assuming vehicle dimensions)
   float obstacle_cost = computeObstacleCost(x, y, heading);
 
   float position_cost = params_.position_coeff * lateral_distance;
@@ -362,22 +361,22 @@ float TrajectoryCost::computeObstacleCost(float x, float y, float heading) const
   }
 
   float total_cost = 0.0f;
-  const float wheelbase = params_.wheelbase;
   const auto& obstacles = host_obstacles_->obstacles();
-  Eigen::Vector2f ego_rear(x, y);
-  Eigen::Vector2f ego_front(x + wheelbase * std::cos(heading), y + wheelbase * std::sin(heading));
+  float3 ego_pose{x, y, heading};
+
+  VehicleCorners vehicle_corners = computeVehicleCorners(ego_pose);
 
   for (const auto& obs : obstacles) {
-    Eigen::Vector3f obstacle_pose(obs.x(), obs.y(), obs.heading());
-    float ellipse_a = 0.5 * obs.length() + params_.safety_margin * 5 + params_.vehicle_width / 2;
-    float ellipse_b = 0.5 * obs.width() + params_.safety_margin + params_.vehicle_width / 2;
-    Eigen::Vector2f ellipse_axes(ellipse_a, ellipse_b);
+    float3 obstacle_pose{static_cast<float>(obs.x()), static_cast<float>(obs.y()),
+                         static_cast<float>(obs.heading())};
+    float half_length =
+        static_cast<float>(obs.length()) / 2.0f + params_.longitudinal_safety_margin;
+    float half_width = static_cast<float>(obs.width()) / 2.0f + params_.lateral_safety_margin;
 
-    float norm_front = computeSafetyMargin(ego_front, obstacle_pose, ellipse_axes);
-    float norm_rear = computeSafetyMargin(ego_rear, obstacle_pose, ellipse_axes);
-
-    if (norm_front <= 0 || norm_rear <= 0) {
-      total_cost += 750.0f;
+    // Use shared host/device function
+    bool in_capsule = cornersInCapsule(vehicle_corners, obstacle_pose, half_length, half_width);
+    if (in_capsule) {
+      total_cost += 1000.0f;
     }
 
     // Future trajectory cost (if available)

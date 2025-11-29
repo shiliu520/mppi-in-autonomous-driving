@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-28 23:35:07
+ * @LastEditTime: 2025-11-29 20:31:40
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -626,6 +626,8 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     obs.set_type(static_cast<common::ObstacleType>(obstacle->getObstacleType()));
     obs.set_x(obstacle_x);
     obs.set_y(obstacle_y);
+    obs.set_length(obstacle->getGeoShape().getLength());
+    obs.set_width(obstacle->getGeoShape().getWidth());
     obs.set_heading(obstacle->getCurrentState()->getGlobalOrientation());
     obstacle_list->append(obs);
   }

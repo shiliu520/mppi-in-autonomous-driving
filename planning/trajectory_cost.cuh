@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-11-29 00:54:32
+ * @LastEditTime: 2025-11-29 21:22:17
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -25,6 +25,10 @@
 
 #define S_IDX(name) S_IND_CLASS(VehicleDynamicsParams, name)
 
+struct VehicleCorners {
+  float2 FL, FR, RL, RR;
+};
+
 // GPU-friendly obstacle representation (POD type)
 struct ObstacleGPU {
   float x, y;           // Center position
@@ -45,20 +49,24 @@ struct ObstacleListGPU {
 };
 
 struct TrajectoryCostParams : public CostParams<2> {
-  float position_coeff = 3000;
-  float velocity_coeff = 500;
-  float angle_coeff = 5000;
-  float accel_effort_coeff = 100.0f;
-  float steer_effort_coeff = 3000.0f;
+  float position_coeff = 300;
+  float velocity_coeff = 50;
+  float angle_coeff = 500;
+  float accel_effort_coeff = 10.0f;
+  float steer_effort_coeff = 300.0f;
   float target_velocity = 10.0f;
   float max_accel = 5;
   float min_accel = -5;
   float max_steer_angle = 0.20;
   float min_steer_angle = -0.20;
-  float vehicle_width = 2.0f;
-  float vehicle_length = 4.5f;
-  float wheelbase = 2.5f;
-  float safety_margin = 1.5f;
+  // vehicle dimensions and safety margin
+  float vehicle_width = 1.85f;
+  float vehicle_length = 4.85f;
+  float wheelbase = 3.0f;
+  float axle_to_front_bumper = 3.90f;
+  float axle_to_rear_bumper = 0.95f;
+  float longitudinal_safety_margin = 1.8f;
+  float lateral_safety_margin = 0.6f;
 
   // Device-side waypoints data
   float3* waypoints = nullptr;  // Device pointer to waypoints array
@@ -148,6 +156,14 @@ protected:
 
   __device__ float computeSafetyMargin(float2 ego_position, float3 obstacle_pose,
                                        float2 ellipse_axes) const;
+
+  // Shared host/device functions for obstacle collision detection
+  __host__ __device__ VehicleCorners computeVehicleCorners(float3 ego_pose) const;
+  __host__ __device__ bool pointInCapsule(float3 capsule_pose, float half_length, float half_width,
+                                          float2 point) const;
+  __host__ __device__ bool cornersInCapsule(const VehicleCorners& vehicle_corners,
+                                            float3 capsule_pose, float half_length,
+                                            float half_width) const;
 };
 
 #ifdef __CUDACC__
@@ -272,17 +288,13 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state) 
          violation;
 }
 
-inline __device__ float TrajectoryCost::computeStateCost(float* s, int timestep, float* theta_c,
-                                                         int* crash_status) {
-  (void)timestep;
-  (void)theta_c;
-  (void)crash_status;
-
+inline __device__ float TrajectoryCost::computeStateCost(float* s, [[maybe_unused]] int timestep,
+                                                         [[maybe_unused]] float* theta_c,
+                                                         [[maybe_unused]] int* crash_status) {
   return computeCostInternalDevice(s);
 }
 
-inline __device__ float TrajectoryCost::terminalCost(float* s, float* theta_c) {
-  (void)theta_c;
+inline __device__ float TrajectoryCost::terminalCost(float* s, [[maybe_unused]] float* theta_c) {
   return computeCostInternalDevice(s);
 }
 
@@ -310,6 +322,93 @@ inline __device__ float TrajectoryCost::computeSafetyMargin(float2 ego_position,
   return norm - 1.0f;
 }
 
+inline __host__ __device__ VehicleCorners
+TrajectoryCost::computeVehicleCorners(float3 ego_pose) const {
+  const float cos_h = cosf(ego_pose.z);
+  const float sin_h = sinf(ego_pose.z);
+
+  // Vehicle dimensions
+  const float half_width = params_.vehicle_width / 2.0f;
+  const float front_length = params_.axle_to_front_bumper;
+  const float rear_length = params_.axle_to_rear_bumper;
+
+  // Compute corner positions in vehicle frame, then transform to world frame
+  VehicleCorners corners;
+
+  // Front-left corner
+  float fl_x_local = front_length;
+  float fl_y_local = half_width;
+  corners.FL.x = ego_pose.x + fl_x_local * cos_h - fl_y_local * sin_h;
+  corners.FL.y = ego_pose.y + fl_x_local * sin_h + fl_y_local * cos_h;
+
+  // Front-right corner
+  float fr_x_local = front_length;
+  float fr_y_local = -half_width;
+  corners.FR.x = ego_pose.x + fr_x_local * cos_h - fr_y_local * sin_h;
+  corners.FR.y = ego_pose.y + fr_x_local * sin_h + fr_y_local * cos_h;
+
+  // Rear-left corner
+  float rl_x_local = -rear_length;
+  float rl_y_local = half_width;
+  corners.RL.x = ego_pose.x + rl_x_local * cos_h - rl_y_local * sin_h;
+  corners.RL.y = ego_pose.y + rl_x_local * sin_h + rl_y_local * cos_h;
+
+  // Rear-right corner
+  float rr_x_local = -rear_length;
+  float rr_y_local = -half_width;
+  corners.RR.x = ego_pose.x + rr_x_local * cos_h - rr_y_local * sin_h;
+  corners.RR.y = ego_pose.y + rr_x_local * sin_h + rr_y_local * cos_h;
+
+  return corners;
+}
+
+inline __host__ __device__ bool TrajectoryCost::pointInCapsule(float3 capsule_pose,
+                                                               float half_length, float half_width,
+                                                               float2 point) const {
+  const float cos_h = cosf(capsule_pose.z);
+  const float sin_h = sinf(capsule_pose.z);
+
+  // Step 1: Construct line segment endpoints A, B
+  float Ax = capsule_pose.x - half_length * cos_h;
+  float Ay = capsule_pose.y - half_length * sin_h;
+  float Bx = capsule_pose.x + half_length * cos_h;
+  float By = capsule_pose.y + half_length * sin_h;
+
+  // Step 2: AP and AB vectors
+  float APx = point.x - Ax;
+  float APy = point.y - Ay;
+
+  float ABx = Bx - Ax;
+  float ABy = By - Ay;
+
+  float AB_len2 = ABx * ABx + ABy * ABy;
+
+  // Projection parameter t
+  float t = (APx * ABx + APy * ABy) / AB_len2;
+  t = fmaxf(0.0f, fminf(1.0f, t));  // Clamp to [0, 1]
+
+  // Closest point C on line segment to point P
+  float Cx = Ax + t * ABx;
+  float Cy = Ay + t * ABy;
+
+  // Step 3: Check distance
+  float dx = point.x - Cx;
+  float dy = point.y - Cy;
+
+  return (dx * dx + dy * dy) <= (half_width * half_width);
+}
+
+inline __host__ __device__ bool TrajectoryCost::cornersInCapsule(
+    const VehicleCorners& vehicle_corners, float3 capsule_pose, float half_length,
+    float half_width) const {
+  // Check if any vehicle corner is inside the capsule
+  if (pointInCapsule(capsule_pose, half_length, half_width, vehicle_corners.FL)) return true;
+  if (pointInCapsule(capsule_pose, half_length, half_width, vehicle_corners.FR)) return true;
+  if (pointInCapsule(capsule_pose, half_length, half_width, vehicle_corners.RL)) return true;
+  if (pointInCapsule(capsule_pose, half_length, half_width, vehicle_corners.RR)) return true;
+  return false;
+}
+
 inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float y,
                                                                   float heading) const {
   if (params_.obstacle_list.obstacles == nullptr || params_.obstacle_list.count == 0) {
@@ -317,24 +416,21 @@ inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float
   }
 
   float total_cost = 0.0f;
-  const float wheelbase = params_.wheelbase;
-  float2 ego_rear{x, y};
-  float2 ego_front{x + wheelbase * __cosf(heading), y + wheelbase * __sinf(heading)};
+  float3 ego_pose{x, y, heading};
+
+  VehicleCorners vehicle_corners = computeVehicleCorners(ego_pose);
 
   // Iterate through all obstacles
   for (int i = 0; i < params_.obstacle_list.count; ++i) {
     const ObstacleGPU& obs = params_.obstacle_list.obstacles[i];
 
-    float3 obs_pos{obs.x, obs.y, obs.heading};
-    float ellipse_a = 0.5 * obs.length + params_.safety_margin * 5 + params_.vehicle_width / 2;
-    float ellipse_b = 0.5 * obs.width + params_.safety_margin + params_.vehicle_width / 2;
-    float2 ellipse_axes{ellipse_a, ellipse_b};
+    float3 capsule_pose{obs.x, obs.y, obs.heading};
+    float half_length = obs.length / 2.0f + params_.longitudinal_safety_margin;
+    float half_width = obs.width / 2.0f + params_.lateral_safety_margin;
 
-    float norm_front = computeSafetyMargin(ego_front, obs_pos, ellipse_axes);
-    float norm_rear = computeSafetyMargin(ego_rear, obs_pos, ellipse_axes);
-
-    if (norm_front <= 0 || norm_rear <= 0) {
-      total_cost += 750.0f;
+    // Check if any vehicle corner is inside the obstacle capsule
+    if (cornersInCapsule(vehicle_corners, capsule_pose, half_length, half_width)) {
+      total_cost += 1000.0f;
     }
 
     // Future trajectory cost (if available)
