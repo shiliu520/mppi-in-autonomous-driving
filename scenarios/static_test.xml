@@ -1109,6 +1109,14 @@
         <x>398.4000</x>
         <y>250.0</y>
       </point>
+      <point>
+        <x>398.4000</x>
+        <y>260.0</y>
+      </point>
+      <point>
+        <x>398.4000</x>
+        <y>280.0</y>
+      </point>
     </leftBound>
     <rightBound>
       <point>
@@ -1190,6 +1198,14 @@
       <point>
         <x>401.6</x>
         <y>250.0</y>
+      </point>
+      <point>
+        <x>401.6</x>
+        <y>260.0</y>
+      </point>
+      <point>
+        <x>401.6</x>
+        <y>280.0</y>
       </point>
     </rightBound>
     <predecessor ref="4"/>
@@ -1278,6 +1294,14 @@
         <x>395.2000</x>
         <y>250.0</y>
       </point>
+      <point>
+        <x>395.2000</x>
+        <y>260.0</y>
+      </point>
+      <point>
+        <x>395.2000</x>
+        <y>280.0</y>
+      </point>
     </leftBound>
     <rightBound>
       <point>
@@ -1359,6 +1383,14 @@
       <point>
         <x>398.4000</x>
         <y>250.0</y>
+      </point>
+      <point>
+        <x>398.4000</x>
+        <y>260.0</y>
+      </point>
+      <point>
+        <x>398.4000</x>
+        <y>280.0</y>
       </point>
     </rightBound>
     <predecessor ref="5"/>
@@ -1448,6 +1480,14 @@
         <x>392.0000</x>
         <y>250.0</y>
       </point>
+      <point>
+        <x>392.0000</x>
+        <y>260.0</y>
+      </point>
+      <point>
+        <x>392.0000</x>
+        <y>280.0</y>
+      </point>
     </leftBound>
     <rightBound>
       <point>
@@ -1529,6 +1569,14 @@
       <point>
         <x>395.2000</x>
         <y>250.0</y>
+      </point>
+      <point>
+        <x>395.2000</x>
+        <y>260.0</y>
+      </point>
+      <point>
+        <x>395.2000</x>
+        <y>280.0</y>
       </point>
     </rightBound>
     <predecessor ref="6"/>
@@ -1616,6 +1664,34 @@
       </position>
       <orientation>
         <exact>0.0</exact>
+      </orientation>
+    </initialState>
+  </staticObstacle>
+  <staticObstacle id="53">
+    <type>car</type>
+    <shape>
+      <rectangle>
+        <length>4.72</length>
+        <width>1.65</width>
+        <orientation>0.0</orientation>
+        <center>
+          <x>0.0</x>
+          <y>0.0</y>
+        </center>
+      </rectangle>
+    </shape>
+    <initialState>
+      <time>
+        <exact>1</exact>
+      </time>
+      <position>
+        <point>
+          <x>396.8</x>
+          <y>175</y>
+        </point>
+      </position>
+      <orientation>
+        <exact>1.58</exact>
       </orientation>
     </initialState>
   </staticObstacle>

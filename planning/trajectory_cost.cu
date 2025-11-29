@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-11-29 21:16:52
+ * @LastEditTime: 2025-11-30 00:01:26
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -19,12 +19,20 @@ void TrajectoryCost::setWaypoints(const std::shared_ptr<ReferenceLine>& waypoint
 
   // Reset cache when waypoints change
   host_last_matched_idx_ = 0;
-  params_.last_matched_idx = 0;
+  params_.reference_line.last_matched_idx = 0;
 
   // Free old device memory if exists
   if (device_waypoints_) {
     cudaFree(device_waypoints_);
     device_waypoints_ = nullptr;
+  }
+  if (device_left_road_edge_) {
+    cudaFree(device_left_road_edge_);
+    device_left_road_edge_ = nullptr;
+  }
+  if (device_right_road_edge_) {
+    cudaFree(device_right_road_edge_);
+    device_right_road_edge_ = nullptr;
   }
 
   if (waypoints && waypoints->size() > 0) {
@@ -50,15 +58,47 @@ void TrajectoryCost::setWaypoints(const std::shared_ptr<ReferenceLine>& waypoint
     cudaMemcpyAsync(device_waypoints_, temp_waypoints.data(), waypoints_size,
                     cudaMemcpyHostToDevice, stream_);
 
-    // Update params with device pointer
-    params_.waypoints = device_waypoints_;
-    params_.waypoints_count = static_cast<int>(num_waypoints);
+    // Convert and copy road edge distances
+    const auto& left_edge = waypoints->get_left_road_edge();
+    const auto& right_edge = waypoints->get_right_road_edge();
+
+    if (!left_edge.empty() && left_edge.size() == num_waypoints) {
+      std::vector<float> temp_left(num_waypoints);
+      for (size_t i = 0; i < num_waypoints; ++i) {
+        temp_left[i] = static_cast<float>(left_edge[i]);
+      }
+
+      size_t edge_size = num_waypoints * sizeof(float);
+      cudaMalloc((void**)&device_left_road_edge_, edge_size);
+      cudaMemcpyAsync(device_left_road_edge_, temp_left.data(), edge_size,
+                      cudaMemcpyHostToDevice, stream_);
+    }
+
+    if (!right_edge.empty() && right_edge.size() == num_waypoints) {
+      std::vector<float> temp_right(num_waypoints);
+      for (size_t i = 0; i < num_waypoints; ++i) {
+        temp_right[i] = static_cast<float>(right_edge[i]);
+      }
+
+      size_t edge_size = num_waypoints * sizeof(float);
+      cudaMalloc((void**)&device_right_road_edge_, edge_size);
+      cudaMemcpyAsync(device_right_road_edge_, temp_right.data(), edge_size,
+                      cudaMemcpyHostToDevice, stream_);
+    }
+
+    // Update params with device pointers
+    params_.reference_line.waypoints = device_waypoints_;
+    params_.reference_line.left_road_edge_dist = device_left_road_edge_;
+    params_.reference_line.right_road_edge_dist = device_right_road_edge_;
+    params_.reference_line.count = static_cast<int>(num_waypoints);
 
     // Synchronize to ensure copy is complete
     cudaStreamSynchronize(stream_);
   } else {
-    params_.waypoints = nullptr;
-    params_.waypoints_count = 0;
+    params_.reference_line.waypoints = nullptr;
+    params_.reference_line.left_road_edge_dist = nullptr;
+    params_.reference_line.right_road_edge_dist = nullptr;
+    params_.reference_line.count = 0;
   }
 
   // Update params on device if GPU is already setup
@@ -88,8 +128,8 @@ void TrajectoryCost::setObstacles(const std::shared_ptr<common::ObstacleList>& o
     const auto& obstacles = obstacle_list->obstacles();
     size_t num_obstacles = obstacles.size();
 
-    // Convert Obstacle data to ObstacleGPU struct array
-    std::vector<ObstacleGPU> temp_obstacles(num_obstacles);
+    // Convert Obstacle data to ObstacleDevice struct array
+    std::vector<ObstacleDevice> temp_obstacles(num_obstacles);
     device_trajectories_.resize(num_obstacles, nullptr);
 
     for (size_t i = 0; i < num_obstacles; ++i) {
@@ -132,7 +172,7 @@ void TrajectoryCost::setObstacles(const std::shared_ptr<common::ObstacleList>& o
     }
 
     // Allocate device memory for obstacle array
-    size_t obstacles_size = num_obstacles * sizeof(ObstacleGPU);
+    size_t obstacles_size = num_obstacles * sizeof(ObstacleDevice);
     cudaMalloc((void**)&device_obstacles_, obstacles_size);
 
     // Copy obstacles to device
@@ -167,7 +207,7 @@ void TrajectoryCost::updateMatchedIndex(float x, float y) {
 
   // Cache is already updated in computeDistanceToReferenceLine
   // Sync to device params
-  params_.last_matched_idx = host_last_matched_idx_;
+  params_.reference_line.last_matched_idx = host_last_matched_idx_;
 
   if (GPUMemStatus_) {
     paramsToDevice();
@@ -188,6 +228,16 @@ void TrajectoryCost::freeCudaMem() {
   if (device_waypoints_) {
     cudaFree(device_waypoints_);
     device_waypoints_ = nullptr;
+  }
+
+  // Free road edge distances device memory
+  if (device_left_road_edge_) {
+    cudaFree(device_left_road_edge_);
+    device_left_road_edge_ = nullptr;
+  }
+  if (device_right_road_edge_) {
+    cudaFree(device_right_road_edge_);
+    device_right_road_edge_ = nullptr;
   }
 
   // Free obstacles device memory
@@ -293,8 +343,15 @@ float TrajectoryCost::computeDistanceToReferenceLine(float x, float y, int* near
     *nearest_idx = min_idx;
   }
 
+  double rx = x_vec[min_idx];
+  double ry = y_vec[min_idx];
+  double heading = host_waypoints_->get_yaw()[min_idx];
+  float latral_sign =
+      ((x - rx) * (-std::sin(heading)) + (y - ry) * std::cos(heading)) >= 0 ? 1.0f : -1.0f;
+  min_dist *= latral_sign;
+
   if (matched_heading) {
-    *matched_heading = static_cast<float>(host_waypoints_->get_yaw()[min_idx]);
+    *matched_heading = static_cast<float>(heading);
   }
 
   return min_dist;
@@ -309,16 +366,27 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
   const float heading = s(S_IDX(YAW));
   const float accel = s(S_IDX(ACCEL));
   const float steer = s(S_IDX(STEER));
+  int matched_idx = -1;
 
   // Compute distance to reference line if waypoints are available
   if (host_waypoints_ && host_waypoints_->size() > 0) {
-    lateral_distance = computeDistanceToReferenceLine(x, y, nullptr, &matched_heading);
+    lateral_distance = computeDistanceToReferenceLine(x, y, &matched_idx, &matched_heading);
   }
 
   float violation = 0.0f;
   if (accel >= params_.max_accel || accel <= params_.min_accel ||
       steer >= params_.max_steer_angle || steer <= params_.min_steer_angle || velocity < -0.0001f) {
-    violation = 500;
+    violation = 500.0f;
+  }
+
+  if (matched_idx != -1) {
+    if (lateral_distance > 0 &&
+        host_waypoints_->get_left_road_edge()[matched_idx] < std::abs(lateral_distance)) {
+      violation = 500.0f;
+    } else if (lateral_distance < 0 &&
+               host_waypoints_->get_right_road_edge()[matched_idx] < std::abs(lateral_distance)) {
+      violation = 500.0f;
+    }
   }
 
   // Compute heading error (normalize to [-pi, pi])
@@ -331,7 +399,7 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
 
   float obstacle_cost = computeObstacleCost(x, y, heading);
 
-  float position_cost = params_.position_coeff * lateral_distance;
+  float position_cost = params_.position_coeff * std::abs(lateral_distance);
   float velocity_cost = params_.velocity_coeff * std::abs(velocity - params_.target_velocity);
   float angle_cost = params_.angle_coeff * std::abs(heading_error);
   float accel_cost = params_.accel_effort_coeff * std::abs(accel);

@@ -10,10 +10,10 @@
 
 #include <spdlog/spdlog.h>
 
-ReferenceLine::ReferenceLine(std::vector<double> _x, std::vector<double> _y,
+ReferenceLine::ReferenceLine(std::vector<double> x_seq, std::vector<double> y_seq,
                              double accuracy /* = 0.2*/)
     : delta_s_(accuracy) {
-  spline_ = CubicSpline2D(_x, _y);
+  spline_ = CubicSpline2D(x_seq, y_seq);
   for (double s = 0.0; s <= spline_.s.back(); s += delta_s_) {
     Eigen::Vector2d pos = spline_.calc_position(s);
     double lyaw = spline_.calc_yaw(s);

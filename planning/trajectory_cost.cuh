@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-11-29 21:22:17
+ * @LastEditTime: 2025-11-30 00:00:55
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -29,8 +29,15 @@ struct VehicleCorners {
   float2 FL, FR, RL, RR;
 };
 
-// GPU-friendly obstacle representation (POD type)
-struct ObstacleGPU {
+struct ReferenceLineDevice {
+  float3* waypoints;              // Device pointer to waypoints [x, y, heading]
+  float* left_road_edge_dist;     // Device pointer to left road edge distances
+  float* right_road_edge_dist;    // Device pointer to right road edge distances
+  int count;                      // Number of waypoints
+  int last_matched_idx;           // Cache for temporal continuity optimization
+};
+
+struct ObstacleDevice {
   float x, y;           // Center position
   float width, length;  // Dimensions
   float heading;        // Orientation in radians
@@ -43,8 +50,8 @@ struct ObstacleGPU {
 };
 
 // GPU-friendly obstacle list
-struct ObstacleListGPU {
-  ObstacleGPU* obstacles;  // Device pointer to obstacle array
+struct ObstacleListDevice {
+  ObstacleDevice* obstacles;  // Device pointer to obstacle array
   int count;               // Number of obstacles
 };
 
@@ -68,15 +75,11 @@ struct TrajectoryCostParams : public CostParams<2> {
   float longitudinal_safety_margin = 1.8f;
   float lateral_safety_margin = 0.6f;
 
-  // Device-side waypoints data
-  float3* waypoints = nullptr;  // Device pointer to waypoints array
-  int waypoints_count = 0;      // Number of waypoints
-
-  // Cache for temporal continuity optimization
-  int last_matched_idx = 0;  // Last matched waypoint index for warm start
+  // Device-side reference line data (structured format)
+  ReferenceLineDevice reference_line;
 
   // Device-side obstacle data (structured format)
-  ObstacleListGPU obstacle_list;
+  ObstacleListDevice obstacle_list;
 
   TrajectoryCostParams() {
     this->control_cost_coeff[0] = 20.0;
@@ -122,10 +125,12 @@ public:
 protected:
   std::shared_ptr<ReferenceLine> host_waypoints_;  // Keep host copy for updates
   float3* device_waypoints_ = nullptr;             // Device pointer for waypoints
+  float* device_left_road_edge_ = nullptr;         // Device pointer for left road edge distances
+  float* device_right_road_edge_ = nullptr;        // Device pointer for right road edge distances
   mutable int host_last_matched_idx_ = 0;          // Host-side cache for last matched index
 
   std::shared_ptr<common::ObstacleList> host_obstacles_;  // Keep host copy for updates
-  ObstacleGPU* device_obstacles_ = nullptr;               // Device pointer for obstacle array
+  ObstacleDevice* device_obstacles_ = nullptr;               // Device pointer for obstacle array
   std::vector<float3*> device_trajectories_;  // Device pointers for each obstacle's trajectory
 
   // Helper function to compute distance to reference line (host version)
@@ -169,12 +174,12 @@ protected:
 #ifdef __CUDACC__
 inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
     float x, float y, float& matched_heading) const {
-  if (params_.waypoints == nullptr || params_.waypoints_count == 0) {
+  if (params_.reference_line.waypoints == nullptr || params_.reference_line.count == 0) {
     return 0.0f;
   }
 
-  const int n = params_.waypoints_count;
-  const int cached_idx = params_.last_matched_idx;
+  const int n = params_.reference_line.count;
+  const int cached_idx = params_.reference_line.last_matched_idx;
   float min_dist = 1e6f;
   int min_idx = cached_idx;
 
@@ -189,8 +194,8 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
   }
 
   for (int i = search_start; i <= search_end; ++i) {
-    float dx = x - params_.waypoints[i].x;
-    float dy = y - params_.waypoints[i].y;
+    float dx = x - params_.reference_line.waypoints[i].x;
+    float dy = y - params_.reference_line.waypoints[i].y;
     float dist = sqrtf(dx * dx + dy * dy);
 
     if (dist < min_dist) {
@@ -202,10 +207,10 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
   // Check line segment projection for more accurate distance
   if (min_idx > 0 && min_idx < n - 1) {
     // Segment [min_idx-1, min_idx]
-    float x0 = params_.waypoints[min_idx - 1].x;
-    float y0 = params_.waypoints[min_idx - 1].y;
-    float x1 = params_.waypoints[min_idx].x;
-    float y1 = params_.waypoints[min_idx].y;
+    float x0 = params_.reference_line.waypoints[min_idx - 1].x;
+    float y0 = params_.reference_line.waypoints[min_idx - 1].y;
+    float x1 = params_.reference_line.waypoints[min_idx].x;
+    float y1 = params_.reference_line.waypoints[min_idx].y;
 
     float dx_seg = x1 - x0;
     float dy_seg = y1 - y0;
@@ -224,8 +229,8 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
     // Segment [min_idx, min_idx+1]
     x0 = x1;
     y0 = y1;
-    x1 = params_.waypoints[min_idx + 1].x;
-    y1 = params_.waypoints[min_idx + 1].y;
+    x1 = params_.reference_line.waypoints[min_idx + 1].x;
+    y1 = params_.reference_line.waypoints[min_idx + 1].y;
 
     dx_seg = x1 - x0;
     dy_seg = y1 - y0;
@@ -244,9 +249,16 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
 
   // Update cache for next timestep (non-const operation on mutable params)
   // Note: This is safe in device code as each thread has its own trajectory
-  const_cast<TrajectoryCostParams&>(params_).last_matched_idx = min_idx;
+  const_cast<ReferenceLineDevice&>(params_.reference_line).last_matched_idx = min_idx;
 
-  matched_heading = params_.waypoints[min_idx].z;
+  matched_heading = params_.reference_line.waypoints[min_idx].z;
+
+  float rx  = params_.reference_line.waypoints[min_idx].x;
+  float ry  = params_.reference_line.waypoints[min_idx].y;
+  float latral_sign =
+      ((x - rx) * (-__sinf(matched_heading)) + (y - ry) * __cosf(matched_heading)) >= 0 ? 1.0f
+                                                                                      : -1.0f;
+  min_dist *= latral_sign;
 
   return min_dist;
 }
@@ -268,6 +280,22 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state) 
     violation = 500;
   }
 
+  // Check road edge boundary violations
+  const int matched_idx = params_.reference_line.last_matched_idx;
+  if (params_.reference_line.left_road_edge_dist != nullptr && 
+      params_.reference_line.right_road_edge_dist != nullptr &&
+      matched_idx >= 0 && matched_idx < params_.reference_line.count) {
+    const float left_edge_dist = params_.reference_line.left_road_edge_dist[matched_idx];
+    const float right_edge_dist = params_.reference_line.right_road_edge_dist[matched_idx];
+    
+    // lateral_distance > 0 means vehicle is on the left side of reference line
+    if (lateral_distance > 0.0f && left_edge_dist < fabsf(lateral_distance)) {
+      violation = 500.0f;  // Exceeds left road edge
+    } else if (lateral_distance < 0.0f && right_edge_dist < fabsf(lateral_distance)) {
+      violation = 500.0f;  // Exceeds right road edge
+    }
+  }
+
   // Compute heading error (normalize to [-pi, pi])
   float heading_error = heading - matched_heading;
   if (heading_error > M_PI_F) {
@@ -279,7 +307,7 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state) 
   // Compute obstacle collision cost (assuming vehicle dimensions)
   const float obstacle_cost = computeObstacleCostDevice(x, y, heading);
 
-  const float position_cost = params_.position_coeff * lateral_distance;
+  const float position_cost = params_.position_coeff * fabsf(lateral_distance);
   const float velocity_cost = params_.velocity_coeff * fabsf(velocity - params_.target_velocity);
   const float angle_cost = params_.angle_coeff * fabsf(heading_error);
   const float accel_cost = params_.accel_effort_coeff * fabsf(accel);
@@ -422,7 +450,7 @@ inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float
 
   // Iterate through all obstacles
   for (int i = 0; i < params_.obstacle_list.count; ++i) {
-    const ObstacleGPU& obs = params_.obstacle_list.obstacles[i];
+    const ObstacleDevice& obs = params_.obstacle_list.obstacles[i];
 
     float3 capsule_pose{obs.x, obs.y, obs.heading};
     float half_length = obs.length / 2.0f + params_.longitudinal_safety_margin;

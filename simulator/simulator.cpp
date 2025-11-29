@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-29 20:31:40
+ * @LastEditTime: 2025-11-30 00:15:52
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -29,6 +29,7 @@ Simulator::Simulator() {
   logger_ = std::make_shared<spdlog::logger>("simulator_logger", console_sink);
   logger_->set_level(spdlog::level::from_str("info"));
   logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
+  perception_range_m_ = 100.0;
 
   save_mcap_ = true;
   vehicle_info_.wheel_base = 2.8;
@@ -64,6 +65,8 @@ Simulator::Simulator() {
         auto next_lanelet = sim_world_->getRoadNetwork()->findLaneletById(paths[idx + 1]);
         if (lanelet_operations::areLaneletsAdjacent(lanelet, next_lanelet)) {
           is_lane_change = true;
+          ref_xs.pop_back();
+          ref_ys.pop_back();
           continue;
         }
       }
@@ -89,8 +92,56 @@ Simulator::Simulator() {
     routing_reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.5);
     LOG_INFO(logger_, "Reference line created with {} points, length {:.2f} m",
              routing_reference_line_->size(), routing_reference_line_->length());
+    
+    // Compute distance to left and right road edges for each reference line point
+    std::vector<double> left_road_edge_distances;
+    std::vector<double> right_road_edge_distances;
+    left_road_edge_distances.reserve(routing_reference_line_->size());
+    right_road_edge_distances.reserve(routing_reference_line_->size());
+    
+    for (size_t i = 0; i < routing_reference_line_->size(); ++i) {
+      const auto point = routing_reference_line_->at(i);
+      const double px = point.x();
+      const double py = point.y();
+      
+      // Find lanelet containing this point
+      auto lanelet = sim_world_->getRoadNetwork()->findLaneletsByPosition(px, py)[0];
+      
+      if (lanelet) {
+        // Compute distance to right road edge
+        // Find the rightmost lanelet by following adjacent right lanelets
+        double right_dist = 1000.0;
+        auto rightmost_lanelet = lanelet;
+        while (rightmost_lanelet->getAdjacentRight().adj != nullptr) {
+          rightmost_lanelet = rightmost_lanelet->getAdjacentRight().adj;
+        }
+        const auto& right_vertices = rightmost_lanelet->getRightBorderVertices();
+        right_dist = computeDistanceToPolyline(px, py, right_vertices);
+        
+        // Compute distance to left road edge
+        // Find the leftmost lanelet by following adjacent left lanelets
+        double left_dist = 1000.0;
+        auto leftmost_lanelet = lanelet;
+        while (leftmost_lanelet->getAdjacentLeft().adj != nullptr) {
+          leftmost_lanelet = leftmost_lanelet->getAdjacentLeft().adj;
+        }
+        const auto& left_vertices = leftmost_lanelet->getLeftBorderVertices();
+        left_dist = computeDistanceToPolyline(px, py, left_vertices);
+        
+        left_road_edge_distances.push_back(left_dist);
+        right_road_edge_distances.push_back(right_dist);
+      } else {
+        LOG_WARN(logger_, "Point ({:.2f}, {:.2f}) not in any lanelet", px, py);
+        left_road_edge_distances.push_back(1000.0);
+        right_road_edge_distances.push_back(1000.0);
+      }
+    }
+    
+    routing_reference_line_->set_left_road_edge(left_road_edge_distances);
+    routing_reference_line_->set_right_road_edge(right_road_edge_distances);
+    LOG_INFO(logger_, "Computed road edge distances for reference line");
   } else {
-    LOG_ERROR(logger_, "No path found from lanelet 2 to 22");
+    LOG_ERROR(logger_, "No path found from lanelet 1 to 22");
     routing_reference_line_ = nullptr;
   }
 }
@@ -289,8 +340,7 @@ bool Simulator::register_publish_channels(void) {
 SceneUpdate Simulator::get_ego_scene_update() const {
   ModelPrimitive ego_model;
   ego_model.url =
-      "https://raw.githubusercontent.com/PuYuuu/dive-into-contingency-planning/master/assets/"
-      "mesh/lexus.glb";
+      "https://raw.githubusercontent.com/PuYuuu/mppi-in-autonomous-driving/master/assets/lexus.glb";
   ego_model.pose = construct_pose();
   ego_model.scale = {1, 1, 1};
   ego_model.media_type = "model/gltf-binary";
@@ -301,7 +351,7 @@ SceneUpdate Simulator::get_ego_scene_update() const {
   ego_car_entity.frame_id = "base_link";
   ego_car_entity.models.emplace_back(ego_model);
   ego_car_entity.timestamp = TimeUtil::NowTimestamp();
-  ego_car_entity.lifetime = Duration{0, 100000000};
+  ego_car_entity.lifetime = Duration{0, 200000000};
 
   SceneUpdate ego_car_scene_update;
   ego_car_scene_update.entities.emplace_back(ego_car_entity);
@@ -323,7 +373,7 @@ SceneUpdate Simulator::get_trajectory_scene_update(void) const {
     std::shared_lock lock(planning_info_mutex_);
     std::vector<Point3> traj_points;
     const auto& optimal_trajectory = planning_info_.optimal_trajectory();
-    for (int idx = 0; idx < planning_info_.optimal_trajectory_size(); ++idx) {
+    for (int idx = 2; idx < planning_info_.optimal_trajectory_size(); ++idx) {
       const float x = optimal_trajectory.at(idx).pos_x();
       const float y = optimal_trajectory.at(idx).pos_y();
       Point3 point{x, y, 0.0};
@@ -542,10 +592,19 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
   static constexpr Color kObstacleColorVRU = {0.22, 0.43, 0.64, 0.8};      // #3A6EA5
   static constexpr Color kObstacleColorVehicle = {0.83, 0.59, 0.25, 0.8};  // #D4963F
   static constexpr Color kObstacleColorBus = {0.8, 0.2, 0.2, 0.8};         // #CC3333
+  StateInfo current_ego_state = get_ego_state();
 
   SceneUpdate obstacles_scene_update;
   auto obstacles = sim_world_->getObstacles();
   for (const auto& obstacle : obstacles) {
+    const double obstacle_x = obstacle->getCurrentState()->getXPosition();
+    const double obstacle_y = obstacle->getCurrentState()->getYPosition();
+    double distance_to_ego =
+        std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
+    if (distance_to_ego > perception_range_m_) {
+      continue;
+    }
+
     double obstacle_length = obstacle->getShapePtr()->getLength();
     double obstacle_width = obstacle->getShapePtr()->getWidth();
     double obstacle_heading = obstacle->getCurrentState()->getGlobalOrientation();
@@ -575,8 +634,7 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
     }
     double half_height = cube_marker.size->z / 2.0;
     Pose obstacle_pose;
-    obstacle_pose.position = Vector3{obstacle->getCurrentState()->getXPosition(),
-                                     obstacle->getCurrentState()->getYPosition(), half_height};
+    obstacle_pose.position = Vector3{obstacle_x, obstacle_y, half_height};
     obstacle_pose.orientation = yaw_to_quaternion(obstacle_heading);
     cube_marker.pose = obstacle_pose;
     obstacle_entity.cubes.emplace_back(cube_marker);
@@ -617,7 +675,7 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     const double obstacle_y = obstacle->getCurrentState()->getYPosition();
     double distance_to_ego =
         std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
-    if (distance_to_ego > 100.0) {
+    if (distance_to_ego > perception_range_m_) {
       continue;
     }
 
@@ -632,4 +690,53 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     obstacle_list->append(obs);
   }
   return obstacle_list;
+}
+
+double Simulator::computeDistanceToPolyline(double px, double py,
+                                            const std::vector<vertex>& vertices) const {
+  if (vertices.empty()) {
+    return 1000.0;
+  }
+
+  double min_distance = 1000.0;
+
+  // Compute distance to each line segment
+  for (size_t i = 0; i < vertices.size() - 1; ++i) {
+    const double x1 = vertices[i].x;
+    const double y1 = vertices[i].y;
+    const double x2 = vertices[i + 1].x;
+    const double y2 = vertices[i + 1].y;
+
+    // Vector from segment start to point
+    const double dx = px - x1;
+    const double dy = py - y1;
+
+    // Segment direction vector
+    const double seg_dx = x2 - x1;
+    const double seg_dy = y2 - y1;
+
+    // Segment length squared
+    const double seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
+
+    if (seg_len_sq < 1e-10) {
+      // Degenerate segment (point)
+      const double dist = std::hypot(dx, dy);
+      min_distance = std::min(min_distance, dist);
+      continue;
+    }
+
+    // Project point onto line segment (parameter t in [0, 1])
+    double t = (dx * seg_dx + dy * seg_dy) / seg_len_sq;
+    t = std::max(0.0, std::min(1.0, t));
+
+    // Closest point on segment
+    const double closest_x = x1 + t * seg_dx;
+    const double closest_y = y1 + t * seg_dy;
+
+    // Distance to closest point
+    const double dist = std::hypot(px - closest_x, py - closest_y);
+    min_distance = std::min(min_distance, dist);
+  }
+
+  return min_distance;
 }

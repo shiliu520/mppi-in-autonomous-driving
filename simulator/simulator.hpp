@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-28 00:13:02
+ * @LastEditTime: 2025-11-30 00:20:53
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -59,8 +59,12 @@ private:
   SceneUpdate get_obstacle_list_scene_update(void) const;
   SceneUpdate get_lanelets_scene_update(
       const std::vector<std::shared_ptr<Lanelet>>& lanelets) const;
+  
+  // Helper function to compute distance from a point to a polyline
+  double computeDistanceToPolyline(double px, double py, const std::vector<vertex>& vertices) const;
 
 private:
+  double perception_range_m_ = 100.0;
   StateInfo ego_state_;
   VehicleInfo vehicle_info_;
   planning::protos::PlanningInfo planning_info_;
