@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-30 00:15:52
+ * @LastEditTime: 2025-12-01 23:46:34
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -24,15 +24,18 @@
 #include <system_error>
 #include <vector>
 
-Simulator::Simulator() {
+Simulator::Simulator(const YAML::Node& config) {
+  auto simulator_config = config["simulator"];
+  std::string simulator_log_level = simulator_config["log_level"].as<std::string>("info");
   auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
   logger_ = std::make_shared<spdlog::logger>("simulator_logger", console_sink);
-  logger_->set_level(spdlog::level::from_str("info"));
+  logger_->set_level(spdlog::level::from_str(simulator_log_level));
   logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
-  perception_range_m_ = 100.0;
+  std::string scenario_file_path = simulator_config["scenario_file_path"].as<std::string>("");
+  perception_range_m_ = simulator_config["perception_range_m"].as<double>(100.0);
+  save_mcap_ = simulator_config["save_mcap"].as<bool>(true);
 
-  save_mcap_ = true;
-  vehicle_info_.wheel_base = 2.8;
+  vehicle_info_.wheel_base = config["vehicle_info"]["wheel_base_m"].as<double>(2.8);
   ego_state_.x = 0;
   ego_state_.y = 0;
   ego_state_.velocity = 0;
@@ -40,15 +43,12 @@ Simulator::Simulator() {
   ego_state_.accel = 0;
   ego_state_.steer = 0;
 
-  // TODO: Load scenario from CommonRoad file, something hardcoded for testing now
-  std::string pathToTestFileOne{
-      "/home/puyu/codes/mppi-in-autonomous-driving/scenarios/static_test.xml"};
   const auto& [obstaclesScenarioOne, roadNetworkScenarioOne, timeStepSizeOne, planningProblems] =
-      InputUtils::getDataFromCommonRoad(pathToTestFileOne);
+      InputUtils::getDataFromCommonRoad(scenario_file_path);
   WorldParameters wp{RoadNetworkParameters(), SensorParameters(), ActuatorParameters::egoDefaults(),
                      TimeParameters(5, 0.3, 0.1), ActuatorParameters::vehicleDefaults()};
   std::vector<std::shared_ptr<Obstacle>> egos = {};
-  sim_world_ = std::make_unique<World>("ARG_Carcarana-6_5_T-1", 0, roadNetworkScenarioOne, egos,
+  sim_world_ = std::make_unique<World>("mppi_simulation", 0, roadNetworkScenarioOne, egos,
                                        obstaclesScenarioOne, timeStepSizeOne, wp);
 
   const std::shared_ptr<LaneletGraph>& topo_graph =

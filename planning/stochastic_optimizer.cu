@@ -1,45 +1,65 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-11-29 00:54:37
+ * @LastEditTime: 2025-12-02 00:01:58
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #include "stochastic_optimizer.cuh"
+#include <spdlog/sinks/stdout_color_sinks.h>
 
-StochasticOptimizer::StochasticOptimizer(/* args */) {
+StochasticOptimizer::StochasticOptimizer(const YAML::Node& config) {
+  auto planning_config = config["planning"];
+  auto constraint_limits = planning_config["constraint_limits"];
+  auto cost_weights = planning_config["cost_weights"];
+  auto mppi_config = planning_config["mppi_params"];
+  auto vehicle_info = config["vehicle_info"];
+
+  std::string planning_log_level = planning_config["log_level"].as<std::string>("info");
+  auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+  logger_ = std::make_shared<spdlog::logger>("stop_line_logger", console_sink);
+  logger_->set_level(spdlog::level::from_str(planning_log_level));
+  logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
+
   dynamics_ = new VehicleDynamics(2.8);
-  dynamics_->control_rngs_[0].x = -1.5;   // min jerk
-  dynamics_->control_rngs_[0].y = 1.5;    // max jerk
-  dynamics_->control_rngs_[1].x = -0.07;  // min steering rate
-  dynamics_->control_rngs_[1].y = 0.07;   // max steering rate
+  dynamics_->control_rngs_[0].x = constraint_limits["min_jerk_mps3"].as<float>(-1.5);
+  dynamics_->control_rngs_[0].y = constraint_limits["max_jerk_mps3"].as<float>(1.5);
+  dynamics_->control_rngs_[1].x = -constraint_limits["max_steering_rate_rps"].as<float>(0.07);
+  dynamics_->control_rngs_[1].y = constraint_limits["max_steering_rate_rps"].as<float>(0.07);
 
   trajectory_cost_ = new TrajectoryCost;
   TrajectoryCostParams new_params;
   new_params.target_velocity = cruise_velocity_;
-  new_params.position_coeff = 15.0f;
-  new_params.velocity_coeff = 10.0f;
-  new_params.angle_coeff = 75.0f;
-  new_params.accel_effort_coeff = 10.0f;
-  new_params.steer_effort_coeff = 80.0f;
-  new_params.max_accel = 2.0f;
-  new_params.min_accel = -4.0f;
-  new_params.max_steer_angle = 0.15;
-  new_params.min_steer_angle = -0.15;
-  new_params.control_cost_coeff[0] = 20.0;
-  new_params.control_cost_coeff[1] = 120.0;
+  new_params.position_coeff = cost_weights["position_weight"].as<float>(15.0f);
+  new_params.velocity_coeff = cost_weights["velocity_weight"].as<float>(10.0f);
+  new_params.angle_coeff = cost_weights["heading_weight"].as<float>(75.0f);
+  new_params.accel_effort_coeff = cost_weights["accel_effort_weight"].as<float>(10.0f);
+  new_params.steer_effort_coeff = cost_weights["steer_effort_weight"].as<float>(80.0f);
+  new_params.max_accel = constraint_limits["max_accel_mps2"].as<float>(2.0f);
+  new_params.min_accel = constraint_limits["min_accel_mps2"].as<float>(-4.0f);
+  new_params.max_steer_angle = constraint_limits["max_steer_angle_rad"].as<float>(0.15f);
+  new_params.min_steer_angle = -constraint_limits["max_steer_angle_rad"].as<float>(0.15f);
+  new_params.control_cost_coeff[0] = cost_weights["jerk_effort_weight"].as<float>(20.0f);
+  new_params.control_cost_coeff[1] = cost_weights["steer_effort_weight"].as<float>(120.0f);
+  new_params.longitudinal_safety_margin = constraint_limits["longitudinal_safety_margin_m"].as<float>(2.0f);
+  new_params.lateral_safety_margin = constraint_limits["lateral_safety_margin_m"].as<float>(0.6f);
+  new_params.wheelbase = vehicle_info["wheel_base_m"].as<float>(3.0f);
+  new_params.vehicle_width = vehicle_info["vehicle_width_m"].as<float>(1.85f);
+  new_params.vehicle_length = vehicle_info["vehicle_length_m"].as<float>(4.85f);
+  new_params.axle_to_front_bumper = vehicle_info["axle_to_front_bumper_m"].as<float>(3.90f);
+  new_params.axle_to_rear_bumper = vehicle_info["axle_to_rear_bumper_m"].as<float>(0.95f);
   trajectory_cost_->setParams(new_params);
 
   float delta_time_ = 0.1;
   int max_iter = 1;
-  float lambda = 2.5;
+  float lambda = mppi_config["lambda"].as<float>(2.5);
   float alpha = 0.0;
   const int num_timesteps = 64;
 
   auto sampler_params = SAMPLER_T::SAMPLING_PARAMS_T();
-  sampler_params.std_dev[0] = 0.5;
-  sampler_params.std_dev[1] = 0.02;
+  sampler_params.std_dev[0] = mppi_config["noise_sigma"]["jerk_std"].as<float>(0.5);
+  sampler_params.std_dev[1] = mppi_config["noise_sigma"]["steer_rate_std"].as<float>(0.02);
   sampler_ = new SAMPLER_T(sampler_params);
 
   ddp_feedback_ = new DDPFeedback<VehicleDynamics, num_timesteps>(dynamics_, delta_time_);
@@ -98,6 +118,7 @@ ControlInput StochasticOptimizer::plan_once(
   dynamics_->step(cur_state, next_state, xdot, control, output, 0, delta_time_);
   mppi_controller_->slideControlSequence(1);
   cost_time_ms_ = solve_time_tic.toc() * 1000.0;
+  LOG_DEBUG(logger_, "StochasticOptimizer plan_once cost time: {:.2f} ms", cost_time_ms_);
 
   target_accel_ = next_state(4);
   target_steer_ = next_state(5);
@@ -111,6 +132,7 @@ Eigen::MatrixXf StochasticOptimizer::get_optimized_trajectory() const {
 
 planning::protos::PlanningInfo StochasticOptimizer::get_debug_result(
     const StateInfo& current_state) const {
+  TicToc get_debug_result_tic;
   planning::protos::PlanningInfo planning_info;
   planning_info.set_target_accel(target_accel_);
   planning_info.set_target_steer(target_steer_);
@@ -146,9 +168,13 @@ planning::protos::PlanningInfo StochasticOptimizer::get_debug_result(
     control_proto->set_steer_rate(optimal_control_seq(1, t));
   }
 
+  // This step is a bit time-consuming and is only opened when debugging and visualizing samples.
+  TicToc calculate_sample_tic;
   mppi_controller_->calculateSampledStateTrajectories();
   auto sampled_trajectories = mppi_controller_->getSampledOutputTrajectories();
   auto sampled_costs = mppi_controller_->getSampledCostTrajectories();
+  LOG_DEBUG(logger_, "StochasticOptimizer calculate sampled trajectories cost time: {:.2f} ms",
+            calculate_sample_tic.toc() * 1000.0);
 
   for (const auto& traj : sampled_trajectories) {
     auto* state_seq_proto = planning_info.add_sample_xs();
@@ -167,6 +193,9 @@ planning::protos::PlanningInfo StochasticOptimizer::get_debug_result(
   for (int i = 0; i < sampled_costs.size() && i < planning_info.sample_xs_size(); ++i) {
     planning_info.mutable_sample_xs(i)->set_cost(sampled_costs[i].col(0).sum());
   }
+
+  LOG_DEBUG(logger_, "StochasticOptimizer get_debug_result cost time: {:.2f} ms",
+            get_debug_result_tic.toc() * 1000.0);
 
   return planning_info;
 }

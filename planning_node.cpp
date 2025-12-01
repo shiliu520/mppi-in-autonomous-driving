@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:59:20
- * @LastEditTime: 2025-11-23 22:25:22
+ * @LastEditTime: 2025-12-02 00:04:40
  * @FilePath: /mppi-in-autonomous-driving/planning_node.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -9,10 +9,40 @@
 #include "planning/stochastic_optimizer.cuh"
 #include "simulator/simulator.hpp"
 
+#include <getopt.h>
+#include <yaml-cpp/yaml.h>
+
 #include <csignal>
 
 int main(int argc, char** argv) {
-  StochasticOptimizer optimizer;
+  int opt;
+  const char* optstring = "c:";
+  std::string config_file_path;
+
+  while ((opt = getopt(argc, argv, optstring)) != -1) {
+    switch (opt) {
+      case 'c':
+        config_file_path = optarg;
+        break;
+      default:
+        spdlog::info("Usage: {} [-c]", argv[0]);
+        exit(EXIT_FAILURE);
+    }
+  }
+
+  if (config_file_path.empty()) {
+    spdlog::info("Usage: {} [-c]", argv[0]);
+    exit(EXIT_FAILURE);
+  }
+
+  YAML::Node config;
+  try {
+    config = YAML::LoadFile(config_file_path);
+  } catch (const YAML::Exception& e) {
+    std::cerr << "Error parsing YAML file: " << e.what() << std::endl;
+    return 1;
+  }
+
   std::atomic_bool done = false;
   static std::function<void()> sigint_handler = [&] { done = true; };
   std::signal(SIGINT, [](int) {
@@ -22,7 +52,8 @@ int main(int argc, char** argv) {
     }
   });
 
-  Simulator simulator;
+  StochasticOptimizer optimizer(config);
+  Simulator simulator(config);
   simulator.start();
 
   const auto main_thread_start = std::chrono::steady_clock::now();

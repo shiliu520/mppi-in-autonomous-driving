@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-11-30 00:20:53
+ * @LastEditTime: 2025-12-01 23:37:31
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -36,7 +36,8 @@ using namespace foxglove::schemas;
 
 class Simulator {
 public:
-  Simulator();
+  Simulator() = delete;
+  explicit Simulator(const YAML::Node& config);
   ~Simulator();
 
   bool start();  // start the simulation thread
