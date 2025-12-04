@@ -70,7 +70,10 @@ include_directories(${PROJECT_SOURCE_DIR}/3rdparty/environment-model/include/)
 
 # Simulator library
 add_library(simulator SHARED ${SIMULATOR_SOURCES} ${COMMON_SOURCES})
-target_compile_definitions(simulator PUBLIC PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
+target_compile_definitions(simulator 
+    PUBLIC 
+        PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
 target_include_directories(simulator
     PUBLIC
         ${PROJECT_SOURCE_DIR}

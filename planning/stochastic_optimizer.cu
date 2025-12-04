@@ -1,15 +1,17 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-12-02 00:01:58
+ * @LastEditTime: 2025-12-04 23:45:13
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #include "stochastic_optimizer.cuh"
+
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-StochasticOptimizer::StochasticOptimizer(const YAML::Node& config) {
+template<int NUM_ROLLOUTS>
+StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config) {
   auto planning_config = config["planning"];
   auto constraint_limits = planning_config["constraint_limits"];
   auto cost_weights = planning_config["cost_weights"];
@@ -28,6 +30,7 @@ StochasticOptimizer::StochasticOptimizer(const YAML::Node& config) {
   dynamics_->control_rngs_[1].x = -constraint_limits["max_steering_rate_rps"].as<float>(0.07);
   dynamics_->control_rngs_[1].y = constraint_limits["max_steering_rate_rps"].as<float>(0.07);
 
+  cruise_velocity_ = planning_config["desired_speed"].as<float>(16.0f);
   trajectory_cost_ = new TrajectoryCost;
   TrajectoryCostParams new_params;
   new_params.target_velocity = cruise_velocity_;
@@ -42,7 +45,8 @@ StochasticOptimizer::StochasticOptimizer(const YAML::Node& config) {
   new_params.min_steer_angle = -constraint_limits["max_steer_angle_rad"].as<float>(0.15f);
   new_params.control_cost_coeff[0] = cost_weights["jerk_effort_weight"].as<float>(20.0f);
   new_params.control_cost_coeff[1] = cost_weights["steer_effort_weight"].as<float>(120.0f);
-  new_params.longitudinal_safety_margin = constraint_limits["longitudinal_safety_margin_m"].as<float>(2.0f);
+  new_params.longitudinal_safety_margin =
+      constraint_limits["longitudinal_safety_margin_m"].as<float>(3.0f);
   new_params.lateral_safety_margin = constraint_limits["lateral_safety_margin_m"].as<float>(0.6f);
   new_params.wheelbase = vehicle_info["wheel_base_m"].as<float>(3.0f);
   new_params.vehicle_width = vehicle_info["vehicle_width_m"].as<float>(1.85f);
@@ -65,7 +69,7 @@ StochasticOptimizer::StochasticOptimizer(const YAML::Node& config) {
   ddp_feedback_ = new DDPFeedback<VehicleDynamics, num_timesteps>(dynamics_, delta_time_);
 
   mppi_controller_ = new VanillaMPPIController<VehicleDynamics, TrajectoryCost,
-                                               DDPFeedback<VehicleDynamics, 64>, 64, 8192>(
+                                               DDPFeedback<VehicleDynamics, 64>, 64, NUM_ROLLOUTS>(
       dynamics_, trajectory_cost_, ddp_feedback_, sampler_, delta_time_, max_iter, lambda, alpha);
   auto controller_params = mppi_controller_->getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
@@ -76,7 +80,8 @@ StochasticOptimizer::StochasticOptimizer(const YAML::Node& config) {
   mppi_controller_->setTopNSampledControlTrajectoriesHelper(128);
 }
 
-StochasticOptimizer::~StochasticOptimizer() {
+template<int NUM_ROLLOUTS>
+StochasticOptimizer<NUM_ROLLOUTS>::~StochasticOptimizer() {
   delete dynamics_;
   delete trajectory_cost_;
   delete sampler_;
@@ -84,7 +89,8 @@ StochasticOptimizer::~StochasticOptimizer() {
   delete mppi_controller_;
 }
 
-ControlInput StochasticOptimizer::plan_once(
+template<int NUM_ROLLOUTS>
+ControlInput StochasticOptimizer<NUM_ROLLOUTS>::plan_once(
     const StateInfo& _current_state, const std::shared_ptr<ReferenceLine>& reference_line,
     const std::shared_ptr<common::ObstacleList>& obstacle_list) {
   // Update waypoints in trajectory cost function
@@ -126,11 +132,13 @@ ControlInput StochasticOptimizer::plan_once(
   return {target_accel_, target_steer_};
 }
 
-Eigen::MatrixXf StochasticOptimizer::get_optimized_trajectory() const {
+template<int NUM_ROLLOUTS>
+Eigen::MatrixXf StochasticOptimizer<NUM_ROLLOUTS>::get_optimized_trajectory() const {
   return mppi_controller_->getTargetStateSeq();
 }
 
-planning::protos::PlanningInfo StochasticOptimizer::get_debug_result(
+template<int NUM_ROLLOUTS>
+planning::protos::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_result(
     const StateInfo& current_state) const {
   TicToc get_debug_result_tic;
   planning::protos::PlanningInfo planning_info;
@@ -199,3 +207,9 @@ planning::protos::PlanningInfo StochasticOptimizer::get_debug_result(
 
   return planning_info;
 }
+
+template class StochasticOptimizer<1024>;
+template class StochasticOptimizer<2048>;
+template class StochasticOptimizer<4096>;
+template class StochasticOptimizer<8192>;
+template class StochasticOptimizer<16384>;

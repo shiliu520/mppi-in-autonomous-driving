@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-01 23:46:34
+ * @LastEditTime: 2025-12-04 23:05:44
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -31,7 +31,12 @@ Simulator::Simulator(const YAML::Node& config) {
   logger_ = std::make_shared<spdlog::logger>("simulator_logger", console_sink);
   logger_->set_level(spdlog::level::from_str(simulator_log_level));
   logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
+
   std::string scenario_file_path = simulator_config["scenario_file_path"].as<std::string>("");
+  if (!scenario_file_path.empty() && scenario_file_path[0] != '/') {
+    scenario_file_path = std::string(PROJECT_SOURCE_DIR) + "/" + scenario_file_path;
+  }
+
   perception_range_m_ = simulator_config["perception_range_m"].as<double>(100.0);
   save_mcap_ = simulator_config["save_mcap"].as<bool>(true);
 
