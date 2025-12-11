@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:16:24
- * @LastEditTime: 2025-12-04 23:15:13
+ * @LastEditTime: 2025-12-09 23:10:05
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -42,9 +42,10 @@ private:
   VehicleDynamics* dynamics_ = nullptr;
   TrajectoryCost* trajectory_cost_ = nullptr;
   SAMPLER_T* sampler_ = nullptr;
-  DDPFeedback<VehicleDynamics, 64>* ddp_feedback_ = nullptr;
-  VanillaMPPIController<VehicleDynamics, TrajectoryCost, DDPFeedback<VehicleDynamics, 64>, 64,
-                        NUM_ROLLOUTS>* mppi_controller_ = nullptr;
+  DDPFeedback<VehicleDynamics, kHorizonLength>* ddp_feedback_ = nullptr;
+  VanillaMPPIController<VehicleDynamics, TrajectoryCost,
+                        DDPFeedback<VehicleDynamics, kHorizonLength>, kHorizonLength, NUM_ROLLOUTS>*
+      mppi_controller_ = nullptr;
 
   float target_accel_ = 0.0;
   float target_steer_ = 0.0;

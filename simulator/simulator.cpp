@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-04 23:05:44
+ * @LastEditTime: 2025-12-11 23:24:30
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -12,6 +12,7 @@
 #include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
 #include "commonroad_cpp/roadNetwork/road_network.h"
 #include "simulator.hpp"
+#include "simple_predictor.hpp"
 
 #include <google/protobuf/descriptor.pb.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
@@ -47,7 +48,6 @@ Simulator::Simulator(const YAML::Node& config) {
   ego_state_.heading = 0;
   ego_state_.accel = 0;
   ego_state_.steer = 0;
-
   const auto& [obstaclesScenarioOne, roadNetworkScenarioOne, timeStepSizeOne, planningProblems] =
       InputUtils::getDataFromCommonRoad(scenario_file_path);
   WorldParameters wp{RoadNetworkParameters(), SensorParameters(), ActuatorParameters::egoDefaults(),
@@ -55,10 +55,9 @@ Simulator::Simulator(const YAML::Node& config) {
   std::vector<std::shared_ptr<Obstacle>> egos = {};
   sim_world_ = std::make_unique<World>("mppi_simulation", 0, roadNetworkScenarioOne, egos,
                                        obstaclesScenarioOne, timeStepSizeOne, wp);
-
   const std::shared_ptr<LaneletGraph>& topo_graph =
       sim_world_->getRoadNetwork()->getTopologicalMap();
-  auto paths = topo_graph->findPaths(1, 22, true);
+  auto paths = topo_graph->findPaths(1, 21, true);
   if (!paths.empty()) {
     std::vector<double> ref_xs;
     std::vector<double> ref_ys;
@@ -97,7 +96,7 @@ Simulator::Simulator(const YAML::Node& config) {
     routing_reference_line_ = std::make_shared<ReferenceLine>(ref_xs, ref_ys, 0.5);
     LOG_INFO(logger_, "Reference line created with {} points, length {:.2f} m",
              routing_reference_line_->size(), routing_reference_line_->length());
-    
+
     // Compute distance to left and right road edges for each reference line point
     std::vector<double> left_road_edge_distances;
     std::vector<double> right_road_edge_distances;
@@ -209,6 +208,7 @@ void Simulator::simulation_loop() {
   const auto loop_start = std::chrono::steady_clock::now();
   auto next_tick = loop_start;
   uint32_t loop_count = 0;
+  size_t world_time_step = 0;
   while (running_) {
     update_ego_state();
 
@@ -248,7 +248,12 @@ void Simulator::simulation_loop() {
     }
     if (loop_count % 5 == 0) {
       // publish obstacles scene at 10 Hz
-      obstacle_list_channel_->log(get_obstacle_list_scene_update());
+      obstacle_list_channel_->log(get_obstacle_list_scene_update(world_time_step));
+      obstacle_prediction_channel_->log(get_prediction_scene_update(world_time_step));
+      if (loop_count != 0) {
+        sim_world_->propagate();
+        ++world_time_step;
+      }
     }
 
     ++loop_count;
@@ -323,6 +328,8 @@ bool Simulator::register_publish_channels(void) {
   sampled_channel_ = make_channel(SceneUpdateChannel::create("/markers/sampled_trajectories"));
   reference_line_channel_ = make_channel(SceneUpdateChannel::create("/markers/reference_line"));
   obstacle_list_channel_ = make_channel(SceneUpdateChannel::create("/markers/obstacles"));
+  obstacle_prediction_channel_ =
+      make_channel(SceneUpdateChannel::create("/markers/obstacle_predictions"));
   transform_channel_ = make_channel(FrameTransformChannel::create("/transform/map_to_baselink"));
 
   auto descriptor = planning::protos::PlanningInfo::descriptor();
@@ -410,59 +417,70 @@ SceneUpdate Simulator::get_lanelets_scene_update(
   auto road_edge_color = Color{0.9, 0.2, 0.2, 1.0};
   for (const auto& lanelet : lanelets) {
     LOG_INFO(logger_, "Lanelet ID: {}", lanelet->getId());
-    LinePrimitive left_border_line;
-    left_border_line.type = LinePrimitive::LineType::LINE_STRIP;
-    left_border_line.pose = lane_pose;
-    left_border_line.thickness = 0.18;
-    left_border_line.scale_invariant = false;
-    left_border_line.color = lane_color;
-    if (lanelet->getAdjacentLeft().adj == nullptr) {
-      // left border is road edge
-      left_border_line.thickness = 0.25;
-      left_border_line.color = road_edge_color;
+    auto [is_left_edge, is_right_edge] =
+        is_lanelet_at_road_edge(lanelet, sim_world_->getRoadNetwork());
+    auto [draw_left, draw_right] =
+        should_draw_lanelet_borders(lanelet, sim_world_->getRoadNetwork());
+    
+    // Draw left border line if needed
+    if (draw_left) {
+      LinePrimitive left_border_line;
+      left_border_line.type = LinePrimitive::LineType::LINE_STRIP;
+      left_border_line.pose = lane_pose;
+      left_border_line.thickness = 0.18;
+      left_border_line.scale_invariant = false;
+      left_border_line.color = lane_color;
+      if (is_left_edge) {
+        // left border is road edge
+        left_border_line.thickness = 0.25;
+        left_border_line.color = road_edge_color;
+      }
+      std::vector<double> left_xs, left_ys;
+      for (const auto& vertex : lanelet->getLeftBorderVertices()) {
+        left_xs.push_back(vertex.x);
+        left_ys.push_back(vertex.y);
+      }
+      auto left_spline = CubicSpline2D(left_xs, left_ys);
+      for (double s = 0.0; s < left_spline.s.back(); s += 0.5) {
+        auto pos = left_spline.calc_position(s);
+        Point3 point;
+        point.x = pos.x();
+        point.y = pos.y();
+        point.z = 0.0;
+        left_border_line.points.emplace_back(point);
+      }
+      lanelet_entity.lines.emplace_back(left_border_line);
     }
-    std::vector<double> left_xs, left_ys;
-    for (const auto& vertex : lanelet->getLeftBorderVertices()) {
-      left_xs.push_back(vertex.x);
-      left_ys.push_back(vertex.y);
-    }
-    auto left_spline = CubicSpline2D(left_xs, left_ys);
-    for (double s = 0.0; s < left_spline.s.back(); s += 0.5) {
-      auto pos = left_spline.calc_position(s);
-      Point3 point;
-      point.x = pos.x();
-      point.y = pos.y();
-      point.z = 0.0;
-      left_border_line.points.emplace_back(point);
-    }
-    lanelet_entity.lines.emplace_back(left_border_line);
 
-    LinePrimitive right_border_line;
-    right_border_line.type = LinePrimitive::LineType::LINE_STRIP;
-    right_border_line.pose = lane_pose;
-    right_border_line.thickness = 0.18;
-    right_border_line.scale_invariant = false;
-    right_border_line.color = lane_color;
-    if (lanelet->getAdjacentRight().adj == nullptr) {
-      // right border is road edge
-      right_border_line.thickness = 0.25;
-      right_border_line.color = road_edge_color;
+    // Draw right border line if needed
+    if (draw_right) {
+      LinePrimitive right_border_line;
+      right_border_line.type = LinePrimitive::LineType::LINE_STRIP;
+      right_border_line.pose = lane_pose;
+      right_border_line.thickness = 0.18;
+      right_border_line.scale_invariant = false;
+      right_border_line.color = lane_color;
+      if (is_right_edge) {
+        // right border is road edge
+        right_border_line.thickness = 0.25;
+        right_border_line.color = road_edge_color;
+      }
+      std::vector<double> right_xs, right_ys;
+      for (const auto& vertex : lanelet->getRightBorderVertices()) {
+        right_xs.push_back(vertex.x);
+        right_ys.push_back(vertex.y);
+      }
+      auto right_spline = CubicSpline2D(right_xs, right_ys);
+      for (double s = 0.0; s < right_spline.s.back(); s += 0.5) {
+        auto pos = right_spline.calc_position(s);
+        Point3 point;
+        point.x = pos.x();
+        point.y = pos.y();
+        point.z = 0.0;
+        right_border_line.points.emplace_back(point);
+      }
+      lanelet_entity.lines.emplace_back(right_border_line);
     }
-    std::vector<double> right_xs, right_ys;
-    for (const auto& vertex : lanelet->getRightBorderVertices()) {
-      right_xs.push_back(vertex.x);
-      right_ys.push_back(vertex.y);
-    }
-    auto right_spline = CubicSpline2D(right_xs, right_ys);
-    for (double s = 0.0; s < right_spline.s.back(); s += 0.5) {
-      auto pos = right_spline.calc_position(s);
-      Point3 point;
-      point.x = pos.x();
-      point.y = pos.y();
-      point.z = 0.0;
-      right_border_line.points.emplace_back(point);
-    }
-    lanelet_entity.lines.emplace_back(right_border_line);
 
     LinePrimitive center_line;
     center_line.type = LinePrimitive::LineType::LINE_LIST;
@@ -590,53 +608,40 @@ std::shared_ptr<ReferenceLine> Simulator::get_reference_line(void) const {
   return nullptr;
 }
 
-SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
-  static constexpr double kObstacleHeightVRU = 1.7;
-  static constexpr double kObstacleHeightVehicle = 1.6;
-  static constexpr double kObstacleHeightBus = 3.0;
-  static constexpr Color kObstacleColorVRU = {0.22, 0.43, 0.64, 0.8};      // #3A6EA5
-  static constexpr Color kObstacleColorVehicle = {0.83, 0.59, 0.25, 0.8};  // #D4963F
-  static constexpr Color kObstacleColorBus = {0.8, 0.2, 0.2, 0.8};         // #CC3333
+SceneUpdate Simulator::get_obstacle_list_scene_update(size_t sim_world_step) {
   StateInfo current_ego_state = get_ego_state();
-
   SceneUpdate obstacles_scene_update;
+
   auto obstacles = sim_world_->getObstacles();
   for (const auto& obstacle : obstacles) {
     const double obstacle_x = obstacle->getCurrentState()->getXPosition();
     const double obstacle_y = obstacle->getCurrentState()->getYPosition();
+    const bool is_static = obstacle->isStatic();
+    const std::string obstacle_id =
+        "obstacle_" + std::to_string(obstacle->getId()) + (is_static ? "/static" : "/dynamic");
     double distance_to_ego =
         std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
-    if (distance_to_ego > perception_range_m_) {
+    if (distance_to_ego > perception_range_m_ ||
+        (!is_static && (sim_world_step > obstacle->getFinalTimeStep() ||
+                        sim_world_step < obstacle->getFirstTimeStep()))) {
       continue;
     }
 
-    double obstacle_length = obstacle->getShapePtr()->getLength();
-    double obstacle_width = obstacle->getShapePtr()->getWidth();
-    double obstacle_heading = obstacle->getCurrentState()->getGlobalOrientation();
+    const double obstacle_length = obstacle->getShapePtr()->getLength();
+    const double obstacle_width = obstacle->getShapePtr()->getWidth();
+    const double obstacle_heading = obstacle->getCurrentState()->getGlobalOrientation();
+    const double obstacle_velocity = obstacle->getCurrentState()->getVelocity();
     ObstacleType obstacle_type = obstacle->getObstacleType();
 
     SceneEntity obstacle_entity;
-    obstacle_entity.id = "obstacle_" + std::to_string(obstacle->getId());
+    obstacle_entity.id = obstacle_id;
     obstacle_entity.frame_id = "map";
     obstacle_entity.timestamp = TimeUtil::NowTimestamp();
     obstacle_entity.lifetime = Duration{0, 200000000};
 
     CubePrimitive cube_marker;
-    if (obstacle_type == ObstacleType::pedestrian || obstacle_type == ObstacleType::bicycle ||
-        obstacle_type == ObstacleType::motorcycle || obstacle_type == ObstacleType::vru) {
-      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightVRU};
-      cube_marker.color = kObstacleColorVRU;
-    } else if (obstacle_type == ObstacleType::car || obstacle_type == ObstacleType::vehicle ||
-               obstacle_type == ObstacleType::parked_vehicle) {
-      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightVehicle};
-      cube_marker.color = kObstacleColorVehicle;
-    } else if (obstacle_type == ObstacleType::bus || obstacle_type == ObstacleType::truck) {
-      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightBus};
-      cube_marker.color = kObstacleColorBus;
-    } else {
-      cube_marker.size = Vector3{obstacle_length, obstacle_width, kObstacleHeightVehicle};
-      cube_marker.color = kObstacleColorVehicle;
-    }
+    std::tie(cube_marker.size, cube_marker.color) =
+        get_obstacle_size_and_color(obstacle_type, obstacle_length, obstacle_width);
     double half_height = cube_marker.size->z / 2.0;
     Pose obstacle_pose;
     obstacle_pose.position = Vector3{obstacle_x, obstacle_y, half_height};
@@ -652,10 +657,10 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
     obstacle_entity.texts.emplace_back(id_text);
 
     ArrowPrimitive heading_arrow;
+    double arrow_length = std::min(std::max(obstacle_velocity * 0.2, 1.5), 4.0);
     heading_arrow.pose = cube_marker.pose;
     heading_arrow.color = cube_marker.color;
-    heading_arrow.color->a = 1.0;
-    heading_arrow.shaft_length = 1.6;
+    heading_arrow.shaft_length = arrow_length;
     heading_arrow.head_length = 0.7;
     heading_arrow.shaft_diameter = 0.3;
     heading_arrow.head_diameter = 0.6;
@@ -664,10 +669,74 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(void) const {
     heading_arrow.pose->position->y += (half_length * std::sin(obstacle_heading));
     obstacle_entity.arrows.emplace_back(heading_arrow);
 
+    if (is_static == false) {
+      TextPrimitive velocity_text;
+      velocity_text.text = to_fixed<1>(obstacle_velocity);
+      velocity_text.pose = heading_arrow.pose;
+      velocity_text.pose->orientation = yaw_to_quaternion(obstacle_heading - M_PI / 2.0);
+      velocity_text.pose->position->x += (arrow_length * 0.5 * std::cos(obstacle_heading));
+      velocity_text.pose->position->y += (arrow_length * 0.5 * std::sin(obstacle_heading));
+      velocity_text.pose->position->z += 0.2;
+      velocity_text.color = Color{1.0, 1.0, 1.0, 1.0};
+      velocity_text.font_size = obstacle_width / 2.5;
+      obstacle_entity.texts.emplace_back(velocity_text);
+    }
+
     obstacles_scene_update.entities.emplace_back(obstacle_entity);
   }
 
   return obstacles_scene_update;
+}
+
+SceneUpdate Simulator::get_prediction_scene_update(size_t sim_world_step) {
+  StateInfo current_ego_state = get_ego_state();
+  SceneUpdate prediction_scene_update;
+
+  {
+    std::unique_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
+    obstacle_predictions_.clear();
+  }
+
+  auto obstacles = sim_world_->getObstacles();
+  for (const auto& obstacle : obstacles) {
+    const double obstacle_x = obstacle->getCurrentState()->getXPosition();
+    const double obstacle_y = obstacle->getCurrentState()->getYPosition();
+    double distance_to_ego =
+        std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
+    if (distance_to_ego > perception_range_m_ ||
+        (!obstacle->isStatic() && (sim_world_step > obstacle->getFinalTimeStep() ||
+                                   sim_world_step < obstacle->getFirstTimeStep()))) {
+      continue;
+    }
+
+    auto predicted_trajectory = get_simple_prediction(obstacle, kHorizonLength);
+    {
+      std::unique_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
+      obstacle_predictions_[std::to_string(obstacle->getId())] = predicted_trajectory;
+    }
+
+    auto [dont_use_obs_size, obs_color] =
+        get_obstacle_size_and_color(obstacle->getObstacleType(), 0, 0);
+    SceneEntity prediction_entity;
+    prediction_entity.id = "prediction_" + std::to_string(obstacle->getId());
+    prediction_entity.frame_id = "map";
+    prediction_entity.timestamp = TimeUtil::NowTimestamp();
+    prediction_entity.lifetime = Duration{0, 200000000};
+    LinePrimitive prediction_line;
+    prediction_line.type = LinePrimitive::LineType::LINE_STRIP;
+    prediction_line.pose = construct_pose();
+    prediction_line.thickness = 0.45;
+    prediction_line.scale_invariant = false;
+    prediction_line.color = obs_color;
+    for (size_t point_idx = 0; point_idx < predicted_trajectory.size(); point_idx += 4) {
+      const auto& point = predicted_trajectory[point_idx];
+      prediction_line.points.emplace_back(Point3{point.x, point.y, 0.0} );
+    }
+    prediction_entity.lines.emplace_back(prediction_line);
+    prediction_scene_update.entities.emplace_back(prediction_entity);
+  }
+
+  return prediction_scene_update;
 }
 
 std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
@@ -685,13 +754,30 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     }
 
     common::Obstacle obs;
-    obs.set_id(std::to_string(obstacle->getId()));
+    std::string obs_id = std::to_string(obstacle->getId());
+    obs.set_id(obs_id);
     obs.set_type(static_cast<common::ObstacleType>(obstacle->getObstacleType()));
     obs.set_x(obstacle_x);
     obs.set_y(obstacle_y);
     obs.set_length(obstacle->getGeoShape().getLength());
     obs.set_width(obstacle->getGeoShape().getWidth());
     obs.set_heading(obstacle->getCurrentState()->getGlobalOrientation());
+    if (!obstacle->isStatic()) {
+      obs.set_is_static(false);
+
+    } else {
+      obs.set_is_static(true);
+    }
+    
+    // Get prediction from the hash map
+    {
+      std::shared_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
+      auto it = obstacle_predictions_.find(obs_id);
+      if (it != obstacle_predictions_.end()) {
+        obs.set_prediction(it->second);
+      }
+    }
+    
     obstacle_list->append(obs);
   }
   return obstacle_list;

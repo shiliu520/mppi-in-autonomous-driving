@@ -2,7 +2,7 @@
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:18:52
  * @LastEditors: Please set LastEditors
- * @LastEditTime: 2025-11-26 23:58:38
+ * @LastEditTime: 2025-12-09 23:06:54
  * @FilePath: /mppi-in-autonomous-driving/common/common.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -23,6 +23,9 @@
 #define LOG_WARN(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::warn, __VA_ARGS__)
 #define LOG_ERROR(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::err, __VA_ARGS__)
 #define LOG_CRITICAL(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::critical, __VA_ARGS__)
+
+constexpr int kHorizonLength = 64;
+constexpr double kTimeStepSec = 0.1;
 
 struct ControlInput {
   double accel{0};  // longitudinal acceleration (m/s^2)
@@ -108,14 +111,14 @@ private:
 };
 
 /**
- * @brief Template function to keep a fixed number of decimal places for floating-point numbers
- * @tparam digits Number of decimal places to keep, limited to 8 if exceeds
+ * @brief Template function to convert a floating-point number to string with fixed decimal places
+ * @tparam digits Number of decimal places to keep
  * @param value Input floating-point number
- * @return double Floating-point number with specified decimal places
+ * @return std::string String representation with specified decimal places
  */
 template <uint8_t digits>
-constexpr double to_fixed(double value) {
-  constexpr int actual_digits = (digits > 8) ? 8 : digits;
-  constexpr double multiplier = std::pow(10.0, actual_digits);
-  return std::round(value * multiplier) / multiplier;
+std::string to_fixed(double value) {
+  std::ostringstream oss;
+  oss << std::fixed << std::setprecision(digits) << value;
+  return oss.str();
 }

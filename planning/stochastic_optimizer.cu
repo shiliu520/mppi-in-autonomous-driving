@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-12-04 23:45:13
+ * @LastEditTime: 2025-12-09 23:10:02
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -59,17 +59,16 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   int max_iter = 1;
   float lambda = mppi_config["lambda"].as<float>(2.5);
   float alpha = 0.0;
-  const int num_timesteps = 64;
 
   auto sampler_params = SAMPLER_T::SAMPLING_PARAMS_T();
   sampler_params.std_dev[0] = mppi_config["noise_sigma"]["jerk_std"].as<float>(0.5);
   sampler_params.std_dev[1] = mppi_config["noise_sigma"]["steer_rate_std"].as<float>(0.02);
   sampler_ = new SAMPLER_T(sampler_params);
 
-  ddp_feedback_ = new DDPFeedback<VehicleDynamics, num_timesteps>(dynamics_, delta_time_);
-
+  ddp_feedback_ = new DDPFeedback<VehicleDynamics, kHorizonLength>(dynamics_, delta_time_);
   mppi_controller_ = new VanillaMPPIController<VehicleDynamics, TrajectoryCost,
-                                               DDPFeedback<VehicleDynamics, 64>, 64, NUM_ROLLOUTS>(
+                                               DDPFeedback<VehicleDynamics, kHorizonLength>,
+                                               kHorizonLength, NUM_ROLLOUTS>(
       dynamics_, trajectory_cost_, ddp_feedback_, sampler_, delta_time_, max_iter, lambda, alpha);
   auto controller_params = mppi_controller_->getParams();
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);

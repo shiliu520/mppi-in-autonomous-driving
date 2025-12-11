@@ -14,6 +14,11 @@ std::vector<size_t> LaneletGraph::findPaths(size_t src, const size_t dst, bool c
     if (src == dst)
         path = {src};
     else {
+        if (verticesAdjSuc.find(src) == verticesAdjSuc.end() ||
+            verticesAdjSuc.find(dst) == verticesAdjSuc.end()) {
+            return path;
+        }
+
         const auto srcId = static_cast<ptrdiff_t>(verticesAdjSuc.at(src));
         const auto dstId = static_cast<ptrdiff_t>(verticesAdjSuc.at(dst));
 

@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-01 23:37:31
+ * @LastEditTime: 2025-12-10 22:59:18
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -31,6 +31,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 using namespace foxglove::schemas;
 
@@ -57,7 +58,8 @@ private:
   SceneUpdate get_trajectory_scene_update(void) const;
   SceneUpdate get_sampled_scene_update(void) const;
   SceneUpdate get_reference_line_scene_update(void) const;
-  SceneUpdate get_obstacle_list_scene_update(void) const;
+  SceneUpdate get_obstacle_list_scene_update(size_t sim_world_step);
+  SceneUpdate get_prediction_scene_update(size_t sim_world_step);
   SceneUpdate get_lanelets_scene_update(
       const std::vector<std::shared_ptr<Lanelet>>& lanelets) const;
   
@@ -81,6 +83,7 @@ private:
   mutable std::shared_mutex ego_state_mutex_;
   mutable std::shared_mutex planning_info_mutex_;
   mutable std::shared_mutex reference_line_mutex_;
+  mutable std::shared_mutex obstacle_prediction_mutex_;
 
   std::unique_ptr<World> sim_world_{nullptr};
 
@@ -91,9 +94,13 @@ private:
   std::unique_ptr<SceneUpdateChannel> ego_car_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> lanelet_scene_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> obstacle_list_channel_{nullptr};
+  std::unique_ptr<SceneUpdateChannel> obstacle_prediction_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> reference_line_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> trajectory_channel_{nullptr};
   std::unique_ptr<SceneUpdateChannel> sampled_channel_{nullptr};
   std::unique_ptr<FrameTransformChannel> transform_channel_{nullptr};
   std::unique_ptr<foxglove::RawChannel> planning_info_channel_{nullptr};
+
+  std::unordered_set<std::string> obstacle_entity_ids_{};
+  std::unordered_map<std::string, std::vector<PathPoint>> obstacle_predictions_{};
 };
