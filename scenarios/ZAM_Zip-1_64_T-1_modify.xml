@@ -19,12 +19,24 @@
         <y>7.4288489</y>
       </point>
       <point>
+        <x>35.00</x>
+        <y>7.024485</y>
+      </point>
+      <point>
         <x>72.917533</x>
-        <y>6.5932609</y>
+        <y>6.5930325</y>
+      </point>
+      <point>
+        <x>100.00</x>
+        <y>6.2848684</y>
       </point>
       <point>
         <x>146.40095</x>
-        <y>5.7567703</y>
+        <y>5.7568844</y>
+      </point>
+      <point>
+        <x>200.00</x>
+        <y>5.14699527</y>
       </point>
     </leftBound>
     <rightBound>
@@ -33,12 +45,24 @@
         <y>3.9306584</y>
       </point>
       <point>
+        <x>35.00</x>
+        <y>3.52493052</y>
+      </point>
+      <point>
         <x>72.877686</x>
-        <y>3.0934538</y>
+        <y>3.0936519</y>
+      </point>
+      <point>
+        <x>100.00</x>
+        <y>2.78483502</y>
       </point>
       <point>
         <x>146.36111</x>
-        <y>2.2570626</y>
+        <y>2.2569634</y>
+      </point>
+      <point>
+        <x>200.00</x>
+        <y>1.6462265</y>
       </point>
     </rightBound>
     <predecessor ref="27"/>
@@ -4705,6 +4729,47 @@
         <point>
           <x>-120.42276</x>
           <y>8.8361651</y>
+        </point>
+      </position>
+      <orientation>
+        <exact>0.0021366198</exact>
+      </orientation>
+      <time>
+        <exact>0</exact>
+      </time>
+      <velocity>
+        <exact>11.226241</exact>
+      </velocity>
+      <acceleration>
+        <exact>0.0</exact>
+      </acceleration>
+      <yawRate>
+        <exact>0.0</exact>
+      </yawRate>
+      <slipAngle>
+        <exact>0.0</exact>
+      </slipAngle>
+    </initialState>
+    <goalState>
+      <position>
+        <lanelet ref="24"/>
+      </position>
+      <time>
+        <intervalStart>84</intervalStart>
+        <intervalEnd>85</intervalEnd>
+      </time>
+      <velocity>
+        <intervalStart>0.0</intervalStart>
+        <intervalEnd>16.226241</intervalEnd>
+      </velocity>
+    </goalState>
+  </planningProblem>
+  <planningProblem id="36">
+    <initialState>
+      <position>
+        <point>
+          <x>-103.42276</x>
+          <y>5.3361651</y>
         </point>
       </position>
       <orientation>

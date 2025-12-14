@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-12-09 23:01:36
- * @LastEditTime: 2025-12-13 21:45:57
+ * @LastEditTime: 2025-12-14 20:09:57
  * @FilePath: /mppi-in-autonomous-driving/simulator/simple_predictor.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -37,8 +37,8 @@ std::vector<PathPoint> get_simple_prediction(const std::shared_ptr<Obstacle>& ob
   cur_point.t = 0.0;
   predicted_trajectory.emplace_back(cur_point);
 
-  for (size_t i = 1; i < num_states; ++i) {
-    const auto& state = sorted_states[i - 1].second;
+  for (size_t i = 0; i < num_states; ++i) {
+    const auto& state = sorted_states[i].second;
     PathPoint point;
     point.x = state->getXPosition();
     point.y = state->getYPosition();

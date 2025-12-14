@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-12-13 23:05:54
+ * @LastEditTime: 2025-12-14 23:20:33
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -357,7 +357,8 @@ float TrajectoryCost::computeDistanceToReferenceLine(float x, float y, int* near
   return min_dist;
 }
 
-float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s) const {
+float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s,
+                                          int timestep) const {
   float lateral_distance = 0.0f;
   float matched_heading = 0.0f;
   const float x = s(S_IDX(POS_X));
@@ -381,9 +382,9 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
 
   const float half_vehicle_width = params_.vehicle_width / 2.0f;
   const float left_lateral_constraint =
-      host_waypoints_->get_left_road_edge()[matched_idx] - half_vehicle_width;
+      host_waypoints_->get_left_road_edge()[matched_idx] - half_vehicle_width + 0.15f;
   const float right_lateral_constraint =
-      host_waypoints_->get_right_road_edge()[matched_idx] - half_vehicle_width;
+      host_waypoints_->get_right_road_edge()[matched_idx] - half_vehicle_width + 0.15f;
   if (matched_idx != -1) {
     if (lateral_distance > 0 && left_lateral_constraint < std::abs(lateral_distance)) {
       violation += 1000.0f;
@@ -400,7 +401,7 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
     heading_error += 2.0f * M_PI;
   }
 
-  float obstacle_cost = computeObstacleCost(x, y, heading);
+  float obstacle_cost = computeObstacleCost(x, y, heading, timestep);
 
   float position_cost = params_.position_coeff * std::abs(lateral_distance);
   float velocity_cost = params_.velocity_coeff * std::abs(velocity - params_.target_velocity);
@@ -413,11 +414,11 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
 
 float TrajectoryCost::computeStateCost(const Eigen::Ref<const output_array> s, int timestep,
                                        int* crash_status) {
-  return computeCostInternal(s);
+  return computeCostInternal(s, timestep);
 }
 
 float TrajectoryCost::terminalCost(const Eigen::Ref<const output_array> s) {
-  return computeCostInternal(s);
+  return computeCostInternal(s, params_.horizon_length);
 }
 
 float TrajectoryCost::computeControlCost(const Eigen::Ref<const control_array> u, int timestep,
@@ -426,7 +427,7 @@ float TrajectoryCost::computeControlCost(const Eigen::Ref<const control_array> u
          params_.control_cost_coeff[1] * std::abs(u[1]);
 }
 
-float TrajectoryCost::computeObstacleCost(float x, float y, float heading) const {
+float TrajectoryCost::computeObstacleCost(float x, float y, float heading, int timestep) const {
   if (!host_obstacles_ || host_obstacles_->obstacles().empty()) {
     return 0.0f;
   }
@@ -444,17 +445,17 @@ float TrajectoryCost::computeObstacleCost(float x, float y, float heading) const
         static_cast<float>(obs.length()) / 2.0f + params_.longitudinal_safety_margin;
     float half_width = static_cast<float>(obs.width()) / 2.0f + params_.lateral_safety_margin;
 
-    // Use shared host/device function
+    const auto& prediction = obs.prediction();
+    if (!obs.is_static() && !prediction.empty()) {
+      int traj_idx = std::min(timestep, static_cast<int>(prediction.size()) - 1);
+      obstacle_pose.x = static_cast<float>(prediction[traj_idx].x);
+      obstacle_pose.y = static_cast<float>(prediction[traj_idx].y);
+      obstacle_pose.z = static_cast<float>(prediction[traj_idx].yaw);
+    }
+
     bool in_capsule = cornersInCapsule(vehicle_corners, obstacle_pose, half_length, half_width);
     if (in_capsule) {
       total_cost += 1000.0f;
-    }
-
-    // Future trajectory cost (if available)
-    const auto& prediction = obs.prediction();
-    if (!prediction.empty()) {
-      // TODO: Add temporal collision checking with predicted trajectory
-      // This allows checking collision at future timesteps along the prediction horizon
     }
   }
 

@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-12-09 23:10:02
+ * @LastEditTime: 2025-12-14 20:26:52
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -33,6 +33,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   cruise_velocity_ = planning_config["desired_speed"].as<float>(16.0f);
   trajectory_cost_ = new TrajectoryCost;
   TrajectoryCostParams new_params;
+  new_params.horizon_length = kHorizonLength;
   new_params.target_velocity = cruise_velocity_;
   new_params.position_coeff = cost_weights["position_weight"].as<float>(15.0f);
   new_params.velocity_coeff = cost_weights["velocity_weight"].as<float>(10.0f);

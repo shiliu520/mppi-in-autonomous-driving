@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-13 22:41:33
+ * @LastEditTime: 2025-12-14 20:00:50
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -724,29 +724,23 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(size_t sim_world_step) {
 SceneUpdate Simulator::get_prediction_scene_update(size_t sim_world_step) {
   StateInfo current_ego_state = get_ego_state();
   SceneUpdate prediction_scene_update;
-
-  {
-    std::unique_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
-    obstacle_predictions_.clear();
-  }
+  std::unique_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
 
   auto obstacles = sim_world_->getObstacles();
   for (const auto& obstacle : obstacles) {
     const double obstacle_x = obstacle->getCurrentState()->getXPosition();
     const double obstacle_y = obstacle->getCurrentState()->getYPosition();
+    const bool is_static = obstacle->isStatic();
     double distance_to_ego =
         std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
-    if (distance_to_ego > perception_range_m_ ||
-        (!obstacle->isStatic() && (sim_world_step > obstacle->getFinalTimeStep() ||
-                                   sim_world_step < obstacle->getFirstTimeStep()))) {
+    if (distance_to_ego > perception_range_m_ || is_static ||
+        (!is_static && (sim_world_step > obstacle->getFinalTimeStep() ||
+                        sim_world_step < obstacle->getFirstTimeStep()))) {
       continue;
     }
 
     auto predicted_trajectory = get_simple_prediction(obstacle, kHorizonLength);
-    {
-      std::unique_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
-      obstacle_predictions_[std::to_string(obstacle->getId())] = predicted_trajectory;
-    }
+    obstacle_predictions_[std::to_string(obstacle->getId())] = predicted_trajectory;
 
     auto [dont_use_obs_size, obs_color] =
         get_obstacle_size_and_color(obstacle->getObstacleType(), 0, 0);
@@ -797,7 +791,6 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     obs.set_heading(obstacle->getCurrentState()->getGlobalOrientation());
     if (!obstacle->isStatic()) {
       obs.set_is_static(false);
-
     } else {
       obs.set_is_static(true);
     }
