@@ -1,6 +1,6 @@
-#include "simulator_utils.hpp"
 #include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
 #include "commonroad_cpp/roadNetwork/road_network.h"
+#include "simulator_utils.hpp"
 
 std::tuple<foxglove::schemas::Vector3, foxglove::schemas::Color> get_obstacle_size_and_color(
     ObstacleType obstacle_type, double obstacle_length, double obstacle_width) {
@@ -141,10 +141,8 @@ foxglove::schemas::TriangleListPrimitive create_line_mesh(
   return mesh;
 }
 
-std::pair<bool, bool> is_lanelet_at_road_edge(
-    const std::shared_ptr<Lanelet>& lanelet,
-    const std::shared_ptr<RoadNetwork>& road_network) {
-  
+std::pair<bool, bool> is_lanelet_at_road_edge(const std::shared_ptr<Lanelet>& lanelet,
+                                              const std::shared_ptr<RoadNetwork>& road_network) {
   if (!lanelet || !road_network) {
     return {false, false};
   }
@@ -157,45 +155,45 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
   if (left_adjacent.adj == nullptr) {
     // No adjacent lanelet on the left - need further check for merge/diverge scenarios
     is_leftmost = true;
-    
+
     // Check if this is a merge/diverge scenario
     const auto& successors = lanelet->getSuccessors();
     if (!successors.empty()) {
       // Check if any successor has other predecessors (indicating merge)
       for (const auto& successor : successors) {
         if (!successor) continue;
-        
+
         const auto& succ_predecessors = successor->getPredecessors();
         if (succ_predecessors.size() > 1) {
           // Multiple lanes merge - need to check relative position
           // Get the first point of current lanelet
           const auto& curr_center = lanelet->getCenterVertices();
           if (curr_center.empty()) continue;
-          
+
           double curr_y = curr_center.front().y;
           double curr_x = curr_center.front().x;
-          
+
           // Check if there's any other predecessor on the left (larger y in most cases)
           bool has_left_neighbor = false;
           for (const auto& pred : succ_predecessors) {
             if (!pred || pred->getId() == lanelet->getId()) continue;
-            
+
             const auto& pred_center = pred->getCenterVertices();
             if (pred_center.empty()) continue;
-            
+
             double pred_y = pred_center.front().y;
             double pred_x = pred_center.front().x;
-            
+
             // Calculate the relative position using cross product
             // Vector from current to predecessor
             double dx = pred_x - curr_x;
             double dy = pred_y - curr_y;
-            
+
             // Direction of current lanelet (use first two points)
             if (curr_center.size() < 2) continue;
             double dir_x = curr_center[1].x - curr_center[0].x;
             double dir_y = curr_center[1].y - curr_center[0].y;
-            
+
             // Cross product: if positive, pred is on the left
             double cross = dir_x * dy - dir_y * dx;
             if (cross > 0.1) {  // Small threshold to avoid numerical errors
@@ -203,7 +201,7 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
               break;
             }
           }
-          
+
           if (has_left_neighbor) {
             is_leftmost = false;
           }
@@ -211,15 +209,14 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
         }
       }
     }
-    
+
   } else if (left_adjacent.oppositeDir) {
     // Adjacent lanelet exists but in opposite direction - this is a road edge
     is_leftmost = true;
   } else {
     // Check line marking - road edges typically have curb or solid markings
     LineMarking left_marking = lanelet->getLineMarkingLeft();
-    if (left_marking == LineMarking::curb || 
-        left_marking == LineMarking::lowered_curb) {
+    if (left_marking == LineMarking::curb || left_marking == LineMarking::lowered_curb) {
       is_leftmost = true;
     }
   }
@@ -229,45 +226,45 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
   if (right_adjacent.adj == nullptr) {
     // No adjacent lanelet on the right - need further check for merge/diverge scenarios
     is_rightmost = true;
-    
+
     // Check if this is a merge/diverge scenario
     const auto& successors = lanelet->getSuccessors();
     if (!successors.empty()) {
       // Check if any successor has other predecessors (indicating merge)
       for (const auto& successor : successors) {
         if (!successor) continue;
-        
+
         const auto& succ_predecessors = successor->getPredecessors();
         if (succ_predecessors.size() > 1) {
           // Multiple lanes merge - need to check relative position
           // Get the first point of current lanelet
           const auto& curr_center = lanelet->getCenterVertices();
           if (curr_center.empty()) continue;
-          
+
           double curr_y = curr_center.front().y;
           double curr_x = curr_center.front().x;
-          
+
           // Check if there's any other predecessor on the right (smaller y in most cases)
           bool has_right_neighbor = false;
           for (const auto& pred : succ_predecessors) {
             if (!pred || pred->getId() == lanelet->getId()) continue;
-            
+
             const auto& pred_center = pred->getCenterVertices();
             if (pred_center.empty()) continue;
-            
+
             double pred_y = pred_center.front().y;
             double pred_x = pred_center.front().x;
-            
+
             // Calculate the relative position using cross product
             // Vector from current to predecessor
             double dx = pred_x - curr_x;
             double dy = pred_y - curr_y;
-            
+
             // Direction of current lanelet (use first two points)
             if (curr_center.size() < 2) continue;
             double dir_x = curr_center[1].x - curr_center[0].x;
             double dir_y = curr_center[1].y - curr_center[0].y;
-            
+
             // Cross product: if negative, pred is on the right
             double cross = dir_x * dy - dir_y * dx;
             if (cross < -0.1) {  // Small threshold to avoid numerical errors
@@ -275,7 +272,7 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
               break;
             }
           }
-          
+
           if (has_right_neighbor) {
             is_rightmost = false;
           }
@@ -283,15 +280,14 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
         }
       }
     }
-    
+
   } else if (right_adjacent.oppositeDir) {
     // Adjacent lanelet exists but in opposite direction - this is a road edge
     is_rightmost = true;
   } else {
     // Check line marking - road edges typically have curb or solid markings
     LineMarking right_marking = lanelet->getLineMarkingRight();
-    if (right_marking == LineMarking::curb || 
-        right_marking == LineMarking::lowered_curb) {
+    if (right_marking == LineMarking::curb || right_marking == LineMarking::lowered_curb) {
       is_rightmost = true;
     }
   }
@@ -300,9 +296,7 @@ std::pair<bool, bool> is_lanelet_at_road_edge(
 }
 
 std::pair<bool, bool> should_draw_lanelet_borders(
-    const std::shared_ptr<Lanelet>& lanelet,
-    const std::shared_ptr<RoadNetwork>& road_network) {
-  
+    const std::shared_ptr<Lanelet>& lanelet, const std::shared_ptr<RoadNetwork>& road_network) {
   if (!lanelet || !road_network) {
     return {true, true};
   }
@@ -312,11 +306,11 @@ std::pair<bool, bool> should_draw_lanelet_borders(
 
   // Get edge detection results
   auto [is_leftmost, is_rightmost] = is_lanelet_at_road_edge(lanelet, road_network);
-  
+
   // Check if this is in a merge/diverge scenario
   bool is_in_merge_scenario = false;
   const auto& successors = lanelet->getSuccessors();
-  
+
   for (const auto& successor : successors) {
     if (!successor) continue;
     const auto& succ_predecessors = successor->getPredecessors();
@@ -335,7 +329,7 @@ std::pair<bool, bool> should_draw_lanelet_borders(
     // Normal scenario: check adjacency
     const auto& left_adjacent = lanelet->getAdjacentLeft();
     const auto& right_adjacent = lanelet->getAdjacentRight();
-    
+
     // Draw left border if:
     // 1. No left adjacent lane (road edge), OR
     // 2. Left adjacent is opposite direction (center line)
@@ -344,14 +338,12 @@ std::pair<bool, bool> should_draw_lanelet_borders(
     } else {
       // Check line marking - draw if it's a special marking
       LineMarking left_marking = lanelet->getLineMarkingLeft();
-      if (left_marking == LineMarking::solid || 
-          left_marking == LineMarking::dashed ||
-          left_marking == LineMarking::curb || 
-          left_marking == LineMarking::lowered_curb) {
+      if (left_marking == LineMarking::solid || left_marking == LineMarking::dashed ||
+          left_marking == LineMarking::curb || left_marking == LineMarking::lowered_curb) {
         draw_left = true;
       }
     }
-    
+
     // Draw right border if:
     // 1. No right adjacent lane (road edge), OR
     // 2. Right adjacent is opposite direction (center line), OR
@@ -362,14 +354,12 @@ std::pair<bool, bool> should_draw_lanelet_borders(
       // For same-direction adjacent lanes, draw right border to avoid missing lines
       // (the adjacent lane on the right will not draw its left border)
       LineMarking right_marking = lanelet->getLineMarkingRight();
-      if (right_marking == LineMarking::solid || 
-          right_marking == LineMarking::dashed ||
-          right_marking == LineMarking::curb || 
-          right_marking == LineMarking::lowered_curb) {
+      if (right_marking == LineMarking::solid || right_marking == LineMarking::dashed ||
+          right_marking == LineMarking::curb || right_marking == LineMarking::lowered_curb) {
         draw_right = true;
       }
     }
-    
+
     // Always draw at least left border if it's at road edge
     if (is_leftmost) {
       draw_left = true;
@@ -380,4 +370,153 @@ std::pair<bool, bool> should_draw_lanelet_borders(
   }
 
   return {draw_left, draw_right};
+}
+
+std::pair<double, double> compute_road_edge_distances(
+    double px, double py, const std::shared_ptr<RoadNetwork>& road_network) {
+  const double kDefaultDistance = 20.0;
+
+  if (!road_network) {
+    return {kDefaultDistance, kDefaultDistance};
+  }
+
+  // Find lanelet containing this point
+  auto lanelets = road_network->findLaneletsByPosition(px, py);
+  if (lanelets.empty()) {
+    return {kDefaultDistance, kDefaultDistance};
+  }
+
+  auto lanelet = lanelets[0];
+  double left_dist = kDefaultDistance;
+  double right_dist = kDefaultDistance;
+
+  // Helper lambda to compute distance to polyline
+  auto computeDistanceToPolyline = [](double px, double py, const std::vector<vertex>& vertices) {
+    if (vertices.empty()) {
+      return 20.0;
+    }
+
+    double min_distance = 20.0;
+    for (size_t i = 0; i < vertices.size() - 1; ++i) {
+      const double x1 = vertices[i].x;
+      const double y1 = vertices[i].y;
+      const double x2 = vertices[i + 1].x;
+      const double y2 = vertices[i + 1].y;
+
+      const double dx = px - x1;
+      const double dy = py - y1;
+      const double seg_dx = x2 - x1;
+      const double seg_dy = y2 - y1;
+      const double seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
+
+      if (seg_len_sq < 1e-10) {
+        const double dist = std::hypot(dx, dy);
+        min_distance = std::min(min_distance, dist);
+        continue;
+      }
+
+      double t = (dx * seg_dx + dy * seg_dy) / seg_len_sq;
+      t = std::max(0.0, std::min(1.0, t));
+
+      const double closest_x = x1 + t * seg_dx;
+      const double closest_y = y1 + t * seg_dy;
+      const double dist = std::hypot(px - closest_x, py - closest_y);
+      min_distance = std::min(min_distance, dist);
+    }
+    return min_distance;
+  };
+
+  // Compute distance to right road edge
+  auto rightmost_lanelet = lanelet;
+  // Find rightmost lanelet considering merge/diverge scenarios
+  while (rightmost_lanelet->getAdjacentRight().adj != nullptr) {
+    rightmost_lanelet = rightmost_lanelet->getAdjacentRight().adj;
+  }
+
+  // Check if there's a merge scenario that might have a lane further right
+  const auto& successors = rightmost_lanelet->getSuccessors();
+  for (const auto& successor : successors) {
+    if (!successor) continue;
+    const auto& succ_predecessors = successor->getPredecessors();
+    if (succ_predecessors.size() > 1) {
+      // Multiple lanes merge - find the actual rightmost
+      const auto& curr_center = rightmost_lanelet->getCenterVertices();
+      if (!curr_center.empty() && curr_center.size() >= 2) {
+        double curr_y = curr_center.front().y;
+        double curr_x = curr_center.front().x;
+        double dir_x = curr_center[1].x - curr_center[0].x;
+        double dir_y = curr_center[1].y - curr_center[0].y;
+
+        for (const auto& pred : succ_predecessors) {
+          if (!pred || pred->getId() == rightmost_lanelet->getId()) continue;
+          const auto& pred_center = pred->getCenterVertices();
+          if (pred_center.empty()) continue;
+
+          double pred_y = pred_center.front().y;
+          double pred_x = pred_center.front().x;
+          double dx = pred_x - curr_x;
+          double dy = pred_y - curr_y;
+          double cross = dir_x * dy - dir_y * dx;
+
+          // If cross product is negative, pred is on the right
+          if (cross < -0.1) {
+            rightmost_lanelet = pred;
+            break;
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  const auto& right_vertices = rightmost_lanelet->getRightBorderVertices();
+  right_dist = computeDistanceToPolyline(px, py, right_vertices);
+
+  // Compute distance to left road edge
+  auto leftmost_lanelet = lanelet;
+  // Find leftmost lanelet considering merge/diverge scenarios
+  while (leftmost_lanelet->getAdjacentLeft().adj != nullptr) {
+    leftmost_lanelet = leftmost_lanelet->getAdjacentLeft().adj;
+  }
+
+  // Check if there's a merge scenario that might have a lane further left
+  const auto& left_successors = leftmost_lanelet->getSuccessors();
+  for (const auto& successor : left_successors) {
+    if (!successor) continue;
+    const auto& succ_predecessors = successor->getPredecessors();
+    if (succ_predecessors.size() > 1) {
+      // Multiple lanes merge - find the actual leftmost
+      const auto& curr_center = leftmost_lanelet->getCenterVertices();
+      if (!curr_center.empty() && curr_center.size() >= 2) {
+        double curr_y = curr_center.front().y;
+        double curr_x = curr_center.front().x;
+        double dir_x = curr_center[1].x - curr_center[0].x;
+        double dir_y = curr_center[1].y - curr_center[0].y;
+
+        for (const auto& pred : succ_predecessors) {
+          if (!pred || pred->getId() == leftmost_lanelet->getId()) continue;
+          const auto& pred_center = pred->getCenterVertices();
+          if (pred_center.empty()) continue;
+
+          double pred_y = pred_center.front().y;
+          double pred_x = pred_center.front().x;
+          double dx = pred_x - curr_x;
+          double dy = pred_y - curr_y;
+          double cross = dir_x * dy - dir_y * dx;
+
+          // If cross product is positive, pred is on the left
+          if (cross > 0.1) {
+            leftmost_lanelet = pred;
+            break;
+          }
+        }
+      }
+      break;
+    }
+  }
+
+  const auto& left_vertices = leftmost_lanelet->getLeftBorderVertices();
+  left_dist = computeDistanceToPolyline(px, py, left_vertices);
+
+  return {left_dist, right_dist};
 }

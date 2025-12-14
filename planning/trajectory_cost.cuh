@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-11-30 00:00:55
+ * @LastEditTime: 2025-12-13 22:57:15
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -277,7 +277,7 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state) 
   float violation = 0.0f;
   if (accel >= params_.max_accel || accel <= params_.min_accel ||
       steer >= params_.max_steer_angle || steer <= params_.min_steer_angle || velocity < -0.0001f) {
-    violation = 500;
+    violation += 500;
   }
 
   // Check road edge boundary violations
@@ -285,14 +285,17 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state) 
   if (params_.reference_line.left_road_edge_dist != nullptr && 
       params_.reference_line.right_road_edge_dist != nullptr &&
       matched_idx >= 0 && matched_idx < params_.reference_line.count) {
-    const float left_edge_dist = params_.reference_line.left_road_edge_dist[matched_idx];
-    const float right_edge_dist = params_.reference_line.right_road_edge_dist[matched_idx];
-    
+    const float half_vehicle_width = params_.vehicle_width / 2.0f;
+    const float left_lateral_constraint =
+        params_.reference_line.left_road_edge_dist[matched_idx] - half_vehicle_width;
+    const float right_lateral_constraint =
+        params_.reference_line.right_road_edge_dist[matched_idx] - half_vehicle_width;
+
     // lateral_distance > 0 means vehicle is on the left side of reference line
-    if (lateral_distance > 0.0f && left_edge_dist < fabsf(lateral_distance)) {
-      violation = 500.0f;  // Exceeds left road edge
-    } else if (lateral_distance < 0.0f && right_edge_dist < fabsf(lateral_distance)) {
-      violation = 500.0f;  // Exceeds right road edge
+    if (lateral_distance > 0.0f && left_lateral_constraint < fabsf(lateral_distance)) {
+      violation += 1000.0f;  // Exceeds left road edge
+    } else if (lateral_distance < 0.0f && right_lateral_constraint < fabsf(lateral_distance)) {
+      violation += 1000.0f;  // Exceeds right road edge
     }
   }
 

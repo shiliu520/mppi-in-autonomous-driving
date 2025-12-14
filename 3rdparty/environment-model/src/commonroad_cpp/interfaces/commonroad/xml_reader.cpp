@@ -440,7 +440,7 @@ void XMLReader::extractPlanningProblem(std::vector<std::shared_ptr<PlanningProbl
         // TODO: Support other goal position types
         std::vector<GoalPosition> goal_positions;
         if (position_node != nullptr) {
-            for (pugi::xml_node position_ref = roadElements.first_child(); position_ref != nullptr;
+            for (pugi::xml_node position_ref = position_node.first_child(); position_ref != nullptr;
                  position_ref = position_ref.next_sibling()) {
                 if (strcmp(position_ref.name(), "lanelet") == 0) {
                     auto lanelet_id = static_cast<uint32_t>(position_ref.attribute("ref").as_ullong());

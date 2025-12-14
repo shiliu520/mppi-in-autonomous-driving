@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-11 23:24:30
+ * @LastEditTime: 2025-12-13 22:41:33
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -11,13 +11,14 @@
 #include "commonroad_cpp/interfaces/commonroad/input_utils.h"
 #include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
 #include "commonroad_cpp/roadNetwork/road_network.h"
-#include "simulator.hpp"
 #include "simple_predictor.hpp"
+#include "simulator.hpp"
 
 #include <google/protobuf/descriptor.pb.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -42,22 +43,75 @@ Simulator::Simulator(const YAML::Node& config) {
   save_mcap_ = simulator_config["save_mcap"].as<bool>(true);
 
   vehicle_info_.wheel_base = config["vehicle_info"]["wheel_base_m"].as<double>(2.8);
-  ego_state_.x = 0;
-  ego_state_.y = 0;
-  ego_state_.velocity = 0;
-  ego_state_.heading = 0;
-  ego_state_.accel = 0;
-  ego_state_.steer = 0;
-  const auto& [obstaclesScenarioOne, roadNetworkScenarioOne, timeStepSizeOne, planningProblems] =
+  int planning_problem_id = simulator_config["planning_problem_id"].as<int>(1);
+
+  const auto& [obstacles_scenario, road_network_scenario, time_step_size, planning_problems] =
       InputUtils::getDataFromCommonRoad(scenario_file_path);
+  assert(!planning_problems.empty() && "No planning problems found in scenario file");
+
+  std::shared_ptr<PlanningProblem> selected_planning_problem = nullptr;
+  for (const auto& problem : planning_problems) {
+    if (problem->getId() == planning_problem_id) {
+      selected_planning_problem = problem;
+      break;
+    }
+  }
+
+  if (selected_planning_problem == nullptr) {
+    selected_planning_problem = planning_problems[0];
+    LOG_WARN(logger_,
+             "Requested planning_problem_id {} not found; using planning_problem_id {} instead.",
+             planning_problem_id, selected_planning_problem->getId());
+  }
+
+  const auto& initial_state = selected_planning_problem->getInitialState();
+  ego_state_.x = initial_state->getXPosition();
+  ego_state_.y = initial_state->getYPosition();
+  ego_state_.velocity = initial_state->getVelocity();
+  ego_state_.heading = initial_state->getOrientation();
+  ego_state_.accel = initial_state->getAcceleration();
+  ego_state_.steer = 0;
+
   WorldParameters wp{RoadNetworkParameters(), SensorParameters(), ActuatorParameters::egoDefaults(),
                      TimeParameters(5, 0.3, 0.1), ActuatorParameters::vehicleDefaults()};
-  std::vector<std::shared_ptr<Obstacle>> egos = {};
-  sim_world_ = std::make_unique<World>("mppi_simulation", 0, roadNetworkScenarioOne, egos,
-                                       obstaclesScenarioOne, timeStepSizeOne, wp);
+  sim_world_ = std::make_unique<World>("mppi_simulation", 0, road_network_scenario,
+                                       std::vector<std::shared_ptr<Obstacle>>{}, obstacles_scenario,
+                                       time_step_size, wp);
+
+  LOG_INFO(logger_, "Loaded scenario from {}, using planning problem ID: {}", scenario_file_path,
+           selected_planning_problem->getId());
+
   const std::shared_ptr<LaneletGraph>& topo_graph =
       sim_world_->getRoadNetwork()->getTopologicalMap();
-  auto paths = topo_graph->findPaths(1, 21, true);
+  size_t start_lanelet_id = 0;
+  size_t goal_lanelet_id = 0;
+  const auto start_lanelets_vector =
+      sim_world_->getRoadNetwork()->findLaneletsByPosition(ego_state_.x, ego_state_.y);
+  if (!start_lanelets_vector.empty()) {
+    start_lanelet_id = start_lanelets_vector[0]->getId();
+    LOG_INFO(logger_, "Ego vehicle start lanelet ID: {}", start_lanelet_id);
+  } else {
+    LOG_ERROR(logger_, "Ego vehicle start position not in any lanelet!");
+  }
+  const auto goal_states_vector = selected_planning_problem->getGoalStates();
+  if (!goal_states_vector.empty()) {
+    const auto goal_positions = goal_states_vector[0].getGoalPositions();
+    if (!goal_positions.empty()) {
+      const uint32_t* goal_position = std::get_if<uint32_t>(&goal_positions[0]);
+      if (goal_position != nullptr) {
+        goal_lanelet_id = *goal_position;
+        LOG_INFO(logger_, "Ego vehicle goal lanelet ID: {}", goal_lanelet_id);
+      } else {
+        LOG_ERROR(logger_, "Goal position is not specified as a lanelet ID!");
+      }
+    } else {
+      LOG_ERROR(logger_, "No goal positions specified in goal state!");
+    }
+  } else {
+    LOG_ERROR(logger_, "No goal states specified in planning problem!");
+  }
+
+  auto paths = topo_graph->findPaths(start_lanelet_id, goal_lanelet_id, true);
   if (!paths.empty()) {
     std::vector<double> ref_xs;
     std::vector<double> ref_ys;
@@ -102,50 +156,21 @@ Simulator::Simulator(const YAML::Node& config) {
     std::vector<double> right_road_edge_distances;
     left_road_edge_distances.reserve(routing_reference_line_->size());
     right_road_edge_distances.reserve(routing_reference_line_->size());
-    
+
     for (size_t i = 0; i < routing_reference_line_->size(); ++i) {
+      // Compute distances to left and right road edges
       const auto point = routing_reference_line_->at(i);
-      const double px = point.x();
-      const double py = point.y();
-      
-      // Find lanelet containing this point
-      auto lanelet = sim_world_->getRoadNetwork()->findLaneletsByPosition(px, py)[0];
-      
-      if (lanelet) {
-        // Compute distance to right road edge
-        // Find the rightmost lanelet by following adjacent right lanelets
-        double right_dist = 1000.0;
-        auto rightmost_lanelet = lanelet;
-        while (rightmost_lanelet->getAdjacentRight().adj != nullptr) {
-          rightmost_lanelet = rightmost_lanelet->getAdjacentRight().adj;
-        }
-        const auto& right_vertices = rightmost_lanelet->getRightBorderVertices();
-        right_dist = computeDistanceToPolyline(px, py, right_vertices);
-        
-        // Compute distance to left road edge
-        // Find the leftmost lanelet by following adjacent left lanelets
-        double left_dist = 1000.0;
-        auto leftmost_lanelet = lanelet;
-        while (leftmost_lanelet->getAdjacentLeft().adj != nullptr) {
-          leftmost_lanelet = leftmost_lanelet->getAdjacentLeft().adj;
-        }
-        const auto& left_vertices = leftmost_lanelet->getLeftBorderVertices();
-        left_dist = computeDistanceToPolyline(px, py, left_vertices);
-        
-        left_road_edge_distances.push_back(left_dist);
-        right_road_edge_distances.push_back(right_dist);
-      } else {
-        LOG_WARN(logger_, "Point ({:.2f}, {:.2f}) not in any lanelet", px, py);
-        left_road_edge_distances.push_back(1000.0);
-        right_road_edge_distances.push_back(1000.0);
-      }
+      auto [left_dist, right_dist] =
+          compute_road_edge_distances(point.x(), point.y(), sim_world_->getRoadNetwork());
+      left_road_edge_distances.push_back(left_dist);
+      right_road_edge_distances.push_back(right_dist);
     }
-    
+
     routing_reference_line_->set_left_road_edge(left_road_edge_distances);
     routing_reference_line_->set_right_road_edge(right_road_edge_distances);
     LOG_INFO(logger_, "Computed road edge distances for reference line");
   } else {
-    LOG_ERROR(logger_, "No path found from lanelet 1 to 22");
+    LOG_ERROR(logger_, "No path found from lanelet {} to {}", start_lanelet_id, goal_lanelet_id);
     routing_reference_line_ = nullptr;
   }
 }
@@ -377,10 +402,9 @@ SceneUpdate Simulator::get_trajectory_scene_update(void) const {
   traj_entity.id = "trajectory";
   traj_entity.frame_id = "map";
   traj_entity.timestamp = TimeUtil::NowTimestamp();
-  traj_entity.lifetime = Duration{0, 200000000};
+  traj_entity.lifetime = Duration{ 0, 200000000 };
 
-  // #0066BFE5
-  Color traj_color = Color{0.0, 0.4, 0.75, 0.9};
+  Color traj_color{ 0.0, 0.4, 0.75, 0.9 };  // #0066BFE5
   {
     std::shared_lock lock(planning_info_mutex_);
     std::vector<Point3> traj_points;
@@ -388,7 +412,7 @@ SceneUpdate Simulator::get_trajectory_scene_update(void) const {
     for (int idx = 2; idx < planning_info_.optimal_trajectory_size(); ++idx) {
       const float x = optimal_trajectory.at(idx).pos_x();
       const float y = optimal_trajectory.at(idx).pos_y();
-      Point3 point{x, y, 0.0};
+      Point3 point{ x, y, 0.0 };
       traj_points.emplace_back(point);
     }
     traj_entity.triangles.emplace_back(create_line_mesh(traj_points, 1.4, traj_color, true));
@@ -411,17 +435,15 @@ SceneUpdate Simulator::get_lanelets_scene_update(
   lanelet_entity.lifetime = Duration{0, 0};
 
   auto lane_pose = construct_pose();
-  // #FFFFFFFF
-  auto lane_color = Color{1.0, 1.0, 1.0, 1.0};
-  // #E63333FF
-  auto road_edge_color = Color{0.9, 0.2, 0.2, 1.0};
+  Color lane_color{ 1.0, 1.0, 1.0, 1.0 };       // #FFFFFFFF
+  Color road_edge_color{ 0.9, 0.2, 0.2, 1.0 };  // #E63333FF
   for (const auto& lanelet : lanelets) {
     LOG_INFO(logger_, "Lanelet ID: {}", lanelet->getId());
     auto [is_left_edge, is_right_edge] =
         is_lanelet_at_road_edge(lanelet, sim_world_->getRoadNetwork());
     auto [draw_left, draw_right] =
         should_draw_lanelet_borders(lanelet, sim_world_->getRoadNetwork());
-    
+
     // Draw left border line if needed
     if (draw_left) {
       LinePrimitive left_border_line;
@@ -473,10 +495,7 @@ SceneUpdate Simulator::get_lanelets_scene_update(
       auto right_spline = CubicSpline2D(right_xs, right_ys);
       for (double s = 0.0; s < right_spline.s.back(); s += 0.5) {
         auto pos = right_spline.calc_position(s);
-        Point3 point;
-        point.x = pos.x();
-        point.y = pos.y();
-        point.z = 0.0;
+        Point3 point{ pos.x(), pos.y(), 0.0 };
         right_border_line.points.emplace_back(point);
       }
       lanelet_entity.lines.emplace_back(right_border_line);
@@ -496,10 +515,7 @@ SceneUpdate Simulator::get_lanelets_scene_update(
     auto center_spline = CubicSpline2D(center_xs, center_ys);
     for (double s = 0.0; s < center_spline.s.back(); s += 3.0) {
       auto pos = center_spline.calc_position(s);
-      Point3 point;
-      point.x = pos.x();
-      point.y = pos.y();
-      point.z = 0.0;
+      Point3 point{ pos.x(), pos.y(), 0.0 };
       center_line.points.emplace_back(point);
     }
     lanelet_entity.lines.emplace_back(center_line);
@@ -525,8 +541,7 @@ SceneUpdate Simulator::get_sampled_scene_update(void) const {
   traj_entity.lifetime = Duration{0, 200000000};
 
   auto traj_pose = construct_pose();
-  // #00CCCCE6
-  auto traj_color = Color{0.0, 0.8, 0.8, 0.9};
+  Color traj_color{ 0.0, 0.8, 0.8, 0.9 }; // #00CCCCE6
 
   {
     std::shared_lock lock(planning_info_mutex_);
@@ -542,7 +557,7 @@ SceneUpdate Simulator::get_sampled_scene_update(void) const {
       for (int idx = 0; idx < trajectory.size(); ++idx) {
         const float x = trajectory.at(idx).pos_x();
         const float y = trajectory.at(idx).pos_y();
-        Point3 point{x, y, 0.0};
+        Point3 point{ x, y, 0.0 };
         sampled_line.points.emplace_back(point);
       }
       traj_entity.lines.emplace_back(sampled_line);
@@ -564,22 +579,29 @@ SceneUpdate Simulator::get_reference_line_scene_update(void) const {
   ref_line_entity.timestamp = TimeUtil::NowTimestamp();
   ref_line_entity.lifetime = Duration{0, 0};
 
-  // #5CD4A8E6
-  Color ref_line_color = Color{0.36, 0.83, 0.66, 0.9};
+  Color ref_line_color{0.36, 0.83, 0.66, 0.9};  // #5CD4A8E6
+  Color road_edge_color{0.9, 0.2, 0.2, 0.9};    // #E63333E6
   LinePrimitive ref_line_primitive;
   ref_line_primitive.type = LinePrimitive::LineType::LINE_STRIP;
   ref_line_primitive.pose = construct_pose();
   ref_line_primitive.thickness = 0.6;
   ref_line_primitive.scale_invariant = false;
   ref_line_primitive.color = ref_line_color;
+  LinePrimitive ref_left_edge_primitive = ref_line_primitive;
+  ref_left_edge_primitive.color = road_edge_color;
+  LinePrimitive ref_right_edge_primitive = ref_left_edge_primitive;
+
   const double sphere_radius = 0.6 * 2.0;
   Vector3 sphere_size{sphere_radius, sphere_radius, sphere_radius};
   if (routing_reference_line_) {
     for (size_t idx = 0; idx < routing_reference_line_->size(); idx += 5) {
-      Point3 point;
-      point.x = routing_reference_line_->at(idx).x();
-      point.y = routing_reference_line_->at(idx).y();
-      point.z = 0.0;
+      double px = routing_reference_line_->at(idx).x();
+      double py = routing_reference_line_->at(idx).y();
+      double pz = routing_reference_line_->at(idx).z();
+      double left_edge_dist = routing_reference_line_->get_left_road_edge()[idx];
+      double right_edge_dist = routing_reference_line_->get_right_road_edge()[idx];
+
+      Point3 point{ px, py, 0.0 };
       ref_line_primitive.points.emplace_back(point);
       if (idx % 50 == 0) {
         SpherePrimitive ref_point_sphere;
@@ -590,8 +612,19 @@ SceneUpdate Simulator::get_reference_line_scene_update(void) const {
         ref_point_sphere.color = ref_line_color;
         ref_line_entity.spheres.emplace_back(ref_point_sphere);
       }
+      Point3 left_edge_point{ px - left_edge_dist * std::sin(pz),
+                              py + left_edge_dist * std::cos(pz),
+                              0.0 };
+      ref_left_edge_primitive.points.emplace_back(left_edge_point);
+      Point3 right_edge_point{
+          px + right_edge_dist * std::sin(pz),
+          py - right_edge_dist * std::cos(pz),
+          0.0 };
+      ref_right_edge_primitive.points.emplace_back(right_edge_point);
     }
     ref_line_entity.lines.emplace_back(ref_line_primitive);
+    ref_line_entity.lines.emplace_back(ref_left_edge_primitive);
+    ref_line_entity.lines.emplace_back(ref_right_edge_primitive);
     ref_line_scene_update.entities.emplace_back(ref_line_entity);
   }
   is_routing_scene_initialized = true;
@@ -652,7 +685,7 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(size_t sim_world_step) {
     TextPrimitive id_text;
     id_text.text = std::to_string(obstacle->getId());
     id_text.pose = cube_marker.pose;
-    id_text.color = Color{1.0, 1.0, 1.0, 1.0};
+    id_text.color = Color{ 1.0, 1.0, 1.0, 1.0 };
     id_text.font_size = obstacle_width;
     obstacle_entity.texts.emplace_back(id_text);
 
@@ -677,7 +710,7 @@ SceneUpdate Simulator::get_obstacle_list_scene_update(size_t sim_world_step) {
       velocity_text.pose->position->x += (arrow_length * 0.5 * std::cos(obstacle_heading));
       velocity_text.pose->position->y += (arrow_length * 0.5 * std::sin(obstacle_heading));
       velocity_text.pose->position->z += 0.2;
-      velocity_text.color = Color{1.0, 1.0, 1.0, 1.0};
+      velocity_text.color = Color{ 1.0, 1.0, 1.0, 1.0 };
       velocity_text.font_size = obstacle_width / 2.5;
       obstacle_entity.texts.emplace_back(velocity_text);
     }
@@ -730,7 +763,7 @@ SceneUpdate Simulator::get_prediction_scene_update(size_t sim_world_step) {
     prediction_line.color = obs_color;
     for (size_t point_idx = 0; point_idx < predicted_trajectory.size(); point_idx += 4) {
       const auto& point = predicted_trajectory[point_idx];
-      prediction_line.points.emplace_back(Point3{point.x, point.y, 0.0} );
+      prediction_line.points.emplace_back(Point3{point.x, point.y, 0.0});
     }
     prediction_entity.lines.emplace_back(prediction_line);
     prediction_scene_update.entities.emplace_back(prediction_entity);
@@ -768,7 +801,7 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     } else {
       obs.set_is_static(true);
     }
-    
+
     // Get prediction from the hash map
     {
       std::shared_lock<std::shared_mutex> lock(obstacle_prediction_mutex_);
@@ -777,57 +810,8 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
         obs.set_prediction(it->second);
       }
     }
-    
+
     obstacle_list->append(obs);
   }
   return obstacle_list;
-}
-
-double Simulator::computeDistanceToPolyline(double px, double py,
-                                            const std::vector<vertex>& vertices) const {
-  if (vertices.empty()) {
-    return 1000.0;
-  }
-
-  double min_distance = 1000.0;
-
-  // Compute distance to each line segment
-  for (size_t i = 0; i < vertices.size() - 1; ++i) {
-    const double x1 = vertices[i].x;
-    const double y1 = vertices[i].y;
-    const double x2 = vertices[i + 1].x;
-    const double y2 = vertices[i + 1].y;
-
-    // Vector from segment start to point
-    const double dx = px - x1;
-    const double dy = py - y1;
-
-    // Segment direction vector
-    const double seg_dx = x2 - x1;
-    const double seg_dy = y2 - y1;
-
-    // Segment length squared
-    const double seg_len_sq = seg_dx * seg_dx + seg_dy * seg_dy;
-
-    if (seg_len_sq < 1e-10) {
-      // Degenerate segment (point)
-      const double dist = std::hypot(dx, dy);
-      min_distance = std::min(min_distance, dist);
-      continue;
-    }
-
-    // Project point onto line segment (parameter t in [0, 1])
-    double t = (dx * seg_dx + dy * seg_dy) / seg_len_sq;
-    t = std::max(0.0, std::min(1.0, t));
-
-    // Closest point on segment
-    const double closest_x = x1 + t * seg_dx;
-    const double closest_y = y1 + t * seg_dy;
-
-    // Distance to closest point
-    const double dist = std::hypot(px - closest_x, py - closest_y);
-    min_distance = std::min(min_distance, dist);
-  }
-
-  return min_distance;
 }

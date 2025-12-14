@@ -1,20 +1,20 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:04:19
- * @LastEditTime: 2025-12-11 00:11:12
+ * @LastEditTime: 2025-12-13 21:46:21
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator_utils.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #pragma once
 
-#include "foxglove/schemas.hpp"
 #include "commonroad_cpp/auxiliaryDefs/types_and_definitions.h"
+#include "foxglove/schemas.hpp"
 
 #include <cmath>
-#include <vector>
-#include <tuple>
 #include <memory>
+#include <tuple>
+#include <vector>
 
 class Lanelet;
 class RoadNetwork;
@@ -64,33 +64,47 @@ foxglove::schemas::TriangleListPrimitive create_line_mesh(
 
 /**
  * @brief Check if a lanelet is at the leftmost or rightmost edge of the road
- * 
+ *
  * This function determines if a lanelet is at the road edge by checking:
  * 1. Adjacent lanelet existence in the same direction
  * 2. Line marking type (curb, solid, etc.)
  * 3. Recursive check through all same-direction adjacent lanelets
- * 
+ *
  * @param lanelet The lanelet to check
  * @param road_network The road network containing the lanelet
  * @return std::pair<bool, bool> First: is leftmost, Second: is rightmost
  */
-std::pair<bool, bool> is_lanelet_at_road_edge(
-    const std::shared_ptr<Lanelet>& lanelet,
-    const std::shared_ptr<RoadNetwork>& road_network);
+std::pair<bool, bool> is_lanelet_at_road_edge(const std::shared_ptr<Lanelet>& lanelet,
+                                              const std::shared_ptr<RoadNetwork>& road_network);
 
 /**
  * @brief Determine whether to draw left or right border lines for a lanelet
- * 
+ *
  * In merge/diverge scenarios, this function intelligently decides which border lines
  * should be drawn to avoid duplicate or missing lines:
  * - In merge scenarios: leftmost lane draws left line, rightmost draws right line
  * - In normal scenarios: draw lines based on road edge detection
  * - Shared borders between adjacent lanes are drawn only once
- * 
+ *
  * @param lanelet The lanelet to check
  * @param road_network The road network containing the lanelet
  * @return std::pair<bool, bool> First: should draw left line, Second: should draw right line
  */
-std::pair<bool, bool> should_draw_lanelet_borders(
-    const std::shared_ptr<Lanelet>& lanelet,
-    const std::shared_ptr<RoadNetwork>& road_network);
+std::pair<bool, bool> should_draw_lanelet_borders(const std::shared_ptr<Lanelet>& lanelet,
+                                                  const std::shared_ptr<RoadNetwork>& road_network);
+
+/**
+ * @brief Compute distances to left and right road edges from a given position
+ *
+ * This function finds the lanelet containing the position and computes the distances
+ * to the actual left and right road edges, considering merge/diverge scenarios.
+ * Uses cross product to determine the true leftmost and rightmost lanes in merge scenarios.
+ *
+ * @param px X coordinate of the position
+ * @param py Y coordinate of the position
+ * @param road_network The road network to search in
+ * @return std::pair<double, double> First: left edge distance, Second: right edge distance
+ *         Returns {20.0, 20.0} if position is not in any lanelet
+ */
+std::pair<double, double> compute_road_edge_distances(
+    double px, double py, const std::shared_ptr<RoadNetwork>& road_network);

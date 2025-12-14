@@ -1,14 +1,15 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-12-09 23:01:36
- * @LastEditTime: 2025-12-10 23:37:54
+ * @LastEditTime: 2025-12-13 21:45:57
  * @FilePath: /mppi-in-autonomous-driving/simulator/simple_predictor.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #include "simple_predictor.hpp"
 
-std::vector<PathPoint> get_simple_prediction(const std::shared_ptr<Obstacle>& obstacle_ptr, size_t horizon_length) {
+std::vector<PathPoint> get_simple_prediction(const std::shared_ptr<Obstacle>& obstacle_ptr,
+                                             size_t horizon_length) {
   std::vector<PathPoint> predicted_trajectory;
 
   auto obstacle_state_map = obstacle_ptr->getTrajectoryPrediction();

@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-10 22:59:18
+ * @LastEditTime: 2025-12-13 22:12:25
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -10,8 +10,8 @@
 
 #include "common/common.hpp"
 #include "common/obstacle.hpp"
-#include "common/reference_line.hpp"
 #include "common/protos/planning_info.pb.h"
+#include "common/reference_line.hpp"
 #include "commonroad_cpp/interfaces/commonroad/input_utils.h"
 #include "commonroad_cpp/obstacle/obstacle_operations.h"
 #include "commonroad_cpp/world.h"
@@ -62,9 +62,6 @@ private:
   SceneUpdate get_prediction_scene_update(size_t sim_world_step);
   SceneUpdate get_lanelets_scene_update(
       const std::vector<std::shared_ptr<Lanelet>>& lanelets) const;
-  
-  // Helper function to compute distance from a point to a polyline
-  double computeDistanceToPolyline(double px, double py, const std::vector<vertex>& vertices) const;
 
 private:
   double perception_range_m_ = 100.0;

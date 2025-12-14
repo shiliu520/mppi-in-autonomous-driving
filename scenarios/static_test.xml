@@ -1723,6 +1723,9 @@
       </slipAngle>
     </initialState>
     <goalState>
+      <position>
+        <lanelet ref="22"/>
+      </position>
       <time>
         <intervalStart>0</intervalStart>
         <intervalEnd>30</intervalEnd>

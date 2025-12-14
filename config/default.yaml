@@ -35,6 +35,7 @@ planning:
 
 simulator:
   scenario_file_path: "scenarios/static_test.xml"
+  planning_problem_id: 1
   log_level: "info"
   save_mcap: true
   problem_id: 1
