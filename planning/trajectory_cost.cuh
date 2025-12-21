@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-12-14 23:21:03
+ * @LastEditTime: 2025-12-22 00:26:01
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -82,9 +82,9 @@ struct TrajectoryCostParams : public CostParams<2> {
   // Device-side obstacle data (structured format)
   ObstacleListDevice obstacle_list;
 
-  TrajectoryCostParams() {
-    this->control_cost_coeff[0] = 20.0;
-    this->control_cost_coeff[1] = 100.0;
+  TrajectoryCostParams(float jerk_weight = 20.0f, float steer_rate_weight = 100.0f) {
+    this->control_cost_coeff[0] = jerk_weight;
+    this->control_cost_coeff[1] = steer_rate_weight;
   }
 };
 
@@ -289,9 +289,9 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state,
       matched_idx < params_.reference_line.count) {
     const float half_vehicle_width = params_.vehicle_width / 2.0f;
     const float left_lateral_constraint =
-        params_.reference_line.left_road_edge_dist[matched_idx] - half_vehicle_width + 0.15f;
+        params_.reference_line.left_road_edge_dist[matched_idx] - half_vehicle_width + 0.3f;
     const float right_lateral_constraint =
-        params_.reference_line.right_road_edge_dist[matched_idx] - half_vehicle_width + 0.15f;
+        params_.reference_line.right_road_edge_dist[matched_idx] - half_vehicle_width + 0.3f;
 
     // lateral_distance > 0 means vehicle is on the left side of reference line
     if (lateral_distance > 0.0f && left_lateral_constraint < fabsf(lateral_distance)) {

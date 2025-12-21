@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-14 20:00:50
+ * @LastEditTime: 2025-12-21 23:16:11
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -123,23 +123,24 @@ Simulator::Simulator(const YAML::Node& config) {
         auto next_lanelet = sim_world_->getRoadNetwork()->findLaneletById(paths[idx + 1]);
         if (lanelet_operations::areLaneletsAdjacent(lanelet, next_lanelet)) {
           is_lane_change = true;
-          ref_xs.pop_back();
-          ref_ys.pop_back();
           continue;
         }
       }
       for (const auto& vertex : lanelet->getCenterVertices()) {
+        double interval_distance = 100.0;
         if (ref_xs.size() > 0) {
           const double last_x = ref_xs.back();
           const double last_y = ref_ys.back();
-          const double dist =
+          interval_distance =
               std::sqrt(std::pow(vertex.x - last_x, 2) + std::pow(vertex.y - last_y, 2));
-          if (dist < 0.1) {
+          if (interval_distance < 0.1) {
             continue;
           }
         }
         if (is_lane_change) {
-          is_lane_change = false;
+          if (interval_distance > 12) {
+            is_lane_change = false;
+          }
           continue;
         }
         ref_xs.push_back(vertex.x);
@@ -233,7 +234,6 @@ void Simulator::simulation_loop() {
   const auto loop_start = std::chrono::steady_clock::now();
   auto next_tick = loop_start;
   uint32_t loop_count = 0;
-  size_t world_time_step = 0;
   while (running_) {
     update_ego_state();
 
@@ -273,11 +273,11 @@ void Simulator::simulation_loop() {
     }
     if (loop_count % 5 == 0) {
       // publish obstacles scene at 10 Hz
-      obstacle_list_channel_->log(get_obstacle_list_scene_update(world_time_step));
-      obstacle_prediction_channel_->log(get_prediction_scene_update(world_time_step));
+      obstacle_list_channel_->log(get_obstacle_list_scene_update(sim_world_timestep_));
+      obstacle_prediction_channel_->log(get_prediction_scene_update(sim_world_timestep_));
       if (loop_count != 0) {
         sim_world_->propagate();
-        ++world_time_step;
+        ++sim_world_timestep_;
       }
     }
 
@@ -316,6 +316,12 @@ void Simulator::update_ego_state() {
     ego_state_.heading +=
         ego_state_.velocity * (std::tan(ego_state_.steer) / vehicle_info_.wheel_base) * dt;
     ego_state_.velocity += ego_state_.accel * dt;
+    if (ego_state_.velocity < 1e-6) {
+      ego_state_.velocity = 0.0;
+      if (ego_state_.accel < 0) {
+        ego_state_.accel = 0.0;
+      }
+    }
 
     LOG_DEBUG(logger_,
               "update_ego_state >>> x: {:.2f}, y: {:.2f}, v: {:.2f}, heading: {:.5f} accel: {:.2f} "
@@ -443,6 +449,7 @@ SceneUpdate Simulator::get_lanelets_scene_update(
         is_lanelet_at_road_edge(lanelet, sim_world_->getRoadNetwork());
     auto [draw_left, draw_right] =
         should_draw_lanelet_borders(lanelet, sim_world_->getRoadNetwork());
+    bool is_in_intersection = lanelet->getLaneletTypes().count(LaneletType::intersection) > 0;
 
     // Draw left border line if needed
     if (draw_left) {
@@ -501,24 +508,31 @@ SceneUpdate Simulator::get_lanelets_scene_update(
       lanelet_entity.lines.emplace_back(right_border_line);
     }
 
-    LinePrimitive center_line;
-    center_line.type = LinePrimitive::LineType::LINE_LIST;
-    center_line.pose = lane_pose;
-    center_line.thickness = 0.12;
-    center_line.scale_invariant = false;
-    center_line.color = lane_color;
-    std::vector<double> center_xs, center_ys;
-    for (const auto& vertex : lanelet->getCenterVertices()) {
-      center_xs.push_back(vertex.x);
-      center_ys.push_back(vertex.y);
+    if (!is_in_intersection) {
+      LinePrimitive center_line;
+      center_line.type = LinePrimitive::LineType::LINE_LIST;
+      center_line.pose = lane_pose;
+      center_line.thickness = 0.12;
+      center_line.scale_invariant = false;
+      center_line.color = lane_color;
+      std::vector<double> center_xs, center_ys;
+      for (const auto& vertex : lanelet->getCenterVertices()) {
+        center_xs.push_back(vertex.x);
+        center_ys.push_back(vertex.y);
+      }
+      auto center_spline = CubicSpline2D(center_xs, center_ys);
+      for (double s = 0.0; s < center_spline.s.back(); s += 3.0) {
+        auto pos = center_spline.calc_position(s);
+        Point3 point{ pos.x(), pos.y(), 0.0 };
+        center_line.points.emplace_back(point);
+      }
+      if (center_line.points.size() % 2 != 0) {
+        auto pos = center_spline.calc_position(center_spline.s.back());
+        Point3 point{ pos.x(), pos.y(), 0.0 };
+        center_line.points.emplace_back(point);
+      }
+      lanelet_entity.lines.emplace_back(center_line);
     }
-    auto center_spline = CubicSpline2D(center_xs, center_ys);
-    for (double s = 0.0; s < center_spline.s.back(); s += 3.0) {
-      auto pos = center_spline.calc_position(s);
-      Point3 point{ pos.x(), pos.y(), 0.0 };
-      center_line.points.emplace_back(point);
-    }
-    lanelet_entity.lines.emplace_back(center_line);
   }
   lanelet_scene_update.entities.emplace_back(lanelet_entity);
   is_hdmap_lanelets_initialized = true;
@@ -776,7 +790,10 @@ std::shared_ptr<common::ObstacleList> Simulator::get_obstacle_list(void) const {
     const double obstacle_y = obstacle->getCurrentState()->getYPosition();
     double distance_to_ego =
         std::hypot(obstacle_x - current_ego_state.x, obstacle_y - current_ego_state.y);
-    if (distance_to_ego > perception_range_m_) {
+    size_t current_timestep = sim_world_timestep_.load(std::memory_order_relaxed);
+    if (distance_to_ego > perception_range_m_ ||
+        (!obstacle->isStatic() && (current_timestep > obstacle->getFinalTimeStep() ||
+                                   current_timestep < obstacle->getFirstTimeStep()))) {
       continue;
     }
 

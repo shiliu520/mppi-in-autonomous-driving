@@ -307,7 +307,109 @@ std::pair<bool, bool> should_draw_lanelet_borders(
   // Get edge detection results
   auto [is_leftmost, is_rightmost] = is_lanelet_at_road_edge(lanelet, road_network);
 
-  // Check if this is in a merge/diverge scenario
+  // Check if lanelet is in an intersection
+  bool is_in_intersection = false;
+  bool is_left_turn = false;
+  bool is_right_turn = false;
+  bool is_straight = false;
+
+  const auto& lanelet_types = lanelet->getLaneletTypes();
+
+  if (lanelet_types.count(LaneletType::intersection) > 0 ||
+      lanelet_types.count(LaneletType::intersectionLeftOutgoing) > 0 ||
+      lanelet_types.count(LaneletType::intersectionRightOutgoing) > 0 ||
+      lanelet_types.count(LaneletType::intersectionStraightOutgoing) > 0) {
+    is_in_intersection = true;
+
+    // Determine turn direction
+    is_left_turn = lanelet_types.count(LaneletType::intersectionLeftOutgoing) > 0;
+    is_right_turn = lanelet_types.count(LaneletType::intersectionRightOutgoing) > 0;
+    is_straight = lanelet_types.count(LaneletType::intersectionStraightOutgoing) > 0;
+  }
+  // Special handling for intersection lanelets
+  if (is_in_intersection) {
+    if (is_left_turn) {
+      // Left turn lanes: generally don't draw borders on either side
+      draw_left = false;
+      draw_right = false;
+    } else if (is_right_turn) {
+      // Right turn lanes: only draw right border
+      draw_left = false;
+      draw_right = true;
+    } else if (is_straight) {
+      // Straight lanes in intersection: complex logic
+      // Check if there are adjacent turn lanes
+      const auto& left_adjacent = lanelet->getAdjacentLeft();
+      const auto& right_adjacent = lanelet->getAdjacentRight();
+
+      bool has_left_turn_neighbor = false;
+      bool has_right_turn_neighbor = false;
+
+      // Check left neighbor
+      if (left_adjacent.adj != nullptr && !left_adjacent.oppositeDir) {
+        const auto& left_types = left_adjacent.adj->getLaneletTypes();
+        has_left_turn_neighbor = left_types.count(LaneletType::intersectionLeftOutgoing) > 0;
+      }
+
+      // Check right neighbor
+      if (right_adjacent.adj != nullptr && !right_adjacent.oppositeDir) {
+        const auto& right_types = right_adjacent.adj->getLaneletTypes();
+        has_right_turn_neighbor = right_types.count(LaneletType::intersectionRightOutgoing) > 0;
+      }
+
+      // Check parent nodes (predecessors) for right turn lanes
+      // Straight and right turn lanes from the same parent don't have adjacent relationship
+      bool parent_has_right_turn = false;
+      const auto& predecessors = lanelet->getPredecessors();
+      for (const auto& pred : predecessors) {
+        if (!pred) continue;
+
+        // Check all successors of this predecessor
+        const auto& pred_successors = pred->getSuccessors();
+        for (const auto& sibling : pred_successors) {
+          if (!sibling || sibling->getId() == lanelet->getId()) continue;
+
+          const auto& sibling_types = sibling->getLaneletTypes();
+          if (sibling_types.count(LaneletType::intersectionRightOutgoing) > 0) {
+            parent_has_right_turn = true;
+            break;
+          }
+        }
+
+        if (parent_has_right_turn) break;
+      }
+
+      // Draw left border if: no left neighbor, or next to left turn lane
+      // if (left_adjacent.adj == nullptr || has_left_turn_neighbor) {
+      //   draw_left = true;
+      // }
+
+      // Draw right border if: no right neighbor, or next to right turn lane (adjacent)
+      // But don't draw if parent has right turn lane (non-adjacent sibling)
+      if (!parent_has_right_turn) {
+        // No adjacent right turn and no sibling right turn from parent
+        draw_right = true;
+      }
+
+    } else {
+      // Generic intersection lanelet (incoming): similar to straight
+      const auto& left_adjacent = lanelet->getAdjacentLeft();
+      const auto& right_adjacent = lanelet->getAdjacentRight();
+
+      // Draw borders at edges or opposite direction
+      if (left_adjacent.adj == nullptr || left_adjacent.oppositeDir || is_leftmost) {
+        draw_left = true;
+      }
+
+      if (right_adjacent.adj == nullptr || right_adjacent.oppositeDir || is_rightmost) {
+        draw_right = true;
+      }
+    }
+
+    return {draw_left, draw_right};
+  }
+
+  // Check if this is in a merge/diverge scenario (non-intersection)
   bool is_in_merge_scenario = false;
   const auto& successors = lanelet->getSuccessors();
 
@@ -389,6 +491,11 @@ std::pair<double, double> compute_road_edge_distances(
   auto lanelet = lanelets[0];
   double left_dist = kDefaultDistance;
   double right_dist = kDefaultDistance;
+  bool is_in_intersection = lanelet->getLaneletTypes().count(LaneletType::intersection) > 0;
+
+  if (is_in_intersection) {
+    return {2.0, 2.0};  // Approximate value for intersections
+  }
 
   // Helper lambda to compute distance to polyline
   auto computeDistanceToPolyline = [](double px, double py, const std::vector<vertex>& vertices) {
@@ -429,7 +536,8 @@ std::pair<double, double> compute_road_edge_distances(
   // Compute distance to right road edge
   auto rightmost_lanelet = lanelet;
   // Find rightmost lanelet considering merge/diverge scenarios
-  while (rightmost_lanelet->getAdjacentRight().adj != nullptr) {
+  while (!rightmost_lanelet->getAdjacentRight().oppositeDir &&
+         rightmost_lanelet->getAdjacentRight().adj != nullptr) {
     rightmost_lanelet = rightmost_lanelet->getAdjacentRight().adj;
   }
 
@@ -475,7 +583,8 @@ std::pair<double, double> compute_road_edge_distances(
   // Compute distance to left road edge
   auto leftmost_lanelet = lanelet;
   // Find leftmost lanelet considering merge/diverge scenarios
-  while (leftmost_lanelet->getAdjacentLeft().adj != nullptr) {
+  while (!leftmost_lanelet->getAdjacentLeft().oppositeDir &&
+         leftmost_lanelet->getAdjacentLeft().adj != nullptr) {
     leftmost_lanelet = leftmost_lanelet->getAdjacentLeft().adj;
   }
 

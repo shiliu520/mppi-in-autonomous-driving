@@ -15,7 +15,7 @@ planning:
       steer_rate_std: 0.02
     num_samples: 16384   # options: 1024, 2048, 4096, 8192, 16384
   cost_weights:
-    position_weight: 15.0
+    position_weight: 30.0
     velocity_weight: 8.0
     heading_weight: 75.0
     accel_effort_weight: 10.0
@@ -34,8 +34,8 @@ planning:
 
 
 simulator:
-  scenario_file_path: "scenarios/static_test.xml"
-  planning_problem_id: 1
+  scenario_file_path: "scenarios/USA_US101-13_5_T-1.xml"
+  planning_problem_id: 35
   log_level: "info"
   save_mcap: true
   problem_id: 1

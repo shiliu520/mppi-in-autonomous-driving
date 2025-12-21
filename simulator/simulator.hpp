@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2025-12-13 22:12:25
+ * @LastEditTime: 2025-12-16 00:16:41
  * @FilePath: /mppi-in-autonomous-driving/simulator/simulator.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -82,6 +82,7 @@ private:
   mutable std::shared_mutex reference_line_mutex_;
   mutable std::shared_mutex obstacle_prediction_mutex_;
 
+  std::atomic<size_t> sim_world_timestep_{0};
   std::unique_ptr<World> sim_world_{nullptr};
 
   bool save_mcap_{false};

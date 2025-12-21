@@ -13,7 +13,7 @@ planning:
     noise_sigma:
       jerk_std: 0.5
       steer_rate_std: 0.02
-    num_samples: 8192   # options: 1024, 2048, 4096, 8192, 16384
+    num_samples: 16384   # options: 1024, 2048, 4096, 8192, 16384
   cost_weights:
     position_weight: 30.0
     velocity_weight: 8.0

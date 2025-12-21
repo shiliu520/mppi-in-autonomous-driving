@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-12-14 20:26:52
+ * @LastEditTime: 2025-12-21 21:06:33
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -24,7 +24,8 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   logger_->set_level(spdlog::level::from_str(planning_log_level));
   logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
 
-  dynamics_ = new VehicleDynamics(2.8);
+  double wheel_base = vehicle_info["wheel_base_m"].as<float>(3.0f);
+  dynamics_ = new VehicleDynamics(wheel_base);
   dynamics_->control_rngs_[0].x = constraint_limits["min_jerk_mps3"].as<float>(-1.5);
   dynamics_->control_rngs_[0].y = constraint_limits["max_jerk_mps3"].as<float>(1.5);
   dynamics_->control_rngs_[1].x = -constraint_limits["max_steering_rate_rps"].as<float>(0.07);
@@ -32,7 +33,10 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
 
   cruise_velocity_ = planning_config["desired_speed"].as<float>(16.0f);
   trajectory_cost_ = new TrajectoryCost;
-  TrajectoryCostParams new_params;
+  double jerk_weight = cost_weights["jerk_effort_weight"].as<float>(20.0f);
+  double steer_rate_weight = cost_weights["steer_rate_effort_weight"].as<float>(100.0f);
+  LOG_INFO(logger_, "Jerk weight: {}, Steer rate weight: {}", jerk_weight, steer_rate_weight);
+  TrajectoryCostParams new_params(jerk_weight, steer_rate_weight);
   new_params.horizon_length = kHorizonLength;
   new_params.target_velocity = cruise_velocity_;
   new_params.position_coeff = cost_weights["position_weight"].as<float>(15.0f);
@@ -49,7 +53,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   new_params.longitudinal_safety_margin =
       constraint_limits["longitudinal_safety_margin_m"].as<float>(3.0f);
   new_params.lateral_safety_margin = constraint_limits["lateral_safety_margin_m"].as<float>(0.6f);
-  new_params.wheelbase = vehicle_info["wheel_base_m"].as<float>(3.0f);
+  new_params.wheelbase = wheel_base;
   new_params.vehicle_width = vehicle_info["vehicle_width_m"].as<float>(1.85f);
   new_params.vehicle_length = vehicle_info["vehicle_length_m"].as<float>(4.85f);
   new_params.axle_to_front_bumper = vehicle_info["axle_to_front_bumper_m"].as<float>(3.90f);

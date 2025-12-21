@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-12-14 23:20:33
+ * @LastEditTime: 2025-12-22 00:25:54
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -382,9 +382,9 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
 
   const float half_vehicle_width = params_.vehicle_width / 2.0f;
   const float left_lateral_constraint =
-      host_waypoints_->get_left_road_edge()[matched_idx] - half_vehicle_width + 0.15f;
+      host_waypoints_->get_left_road_edge()[matched_idx] - half_vehicle_width + 0.3f;
   const float right_lateral_constraint =
-      host_waypoints_->get_right_road_edge()[matched_idx] - half_vehicle_width + 0.15f;
+      host_waypoints_->get_right_road_edge()[matched_idx] - half_vehicle_width + 0.3f;
   if (matched_idx != -1) {
     if (lateral_distance > 0 && left_lateral_constraint < std::abs(lateral_distance)) {
       violation += 1000.0f;
