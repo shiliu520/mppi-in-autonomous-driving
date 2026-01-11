@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:09
- * @LastEditTime: 2025-12-22 00:25:54
+ * @LastEditTime: 2026-01-11 23:01:58
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -70,8 +70,8 @@ void TrajectoryCost::setWaypoints(const std::shared_ptr<ReferenceLine>& waypoint
 
       size_t edge_size = num_waypoints * sizeof(float);
       cudaMalloc((void**)&device_left_road_edge_, edge_size);
-      cudaMemcpyAsync(device_left_road_edge_, temp_left.data(), edge_size,
-                      cudaMemcpyHostToDevice, stream_);
+      cudaMemcpyAsync(device_left_road_edge_, temp_left.data(), edge_size, cudaMemcpyHostToDevice,
+                      stream_);
     }
 
     if (!right_edge.empty() && right_edge.size() == num_waypoints) {
@@ -82,8 +82,8 @@ void TrajectoryCost::setWaypoints(const std::shared_ptr<ReferenceLine>& waypoint
 
       size_t edge_size = num_waypoints * sizeof(float);
       cudaMalloc((void**)&device_right_road_edge_, edge_size);
-      cudaMemcpyAsync(device_right_road_edge_, temp_right.data(), edge_size,
-                      cudaMemcpyHostToDevice, stream_);
+      cudaMemcpyAsync(device_right_road_edge_, temp_right.data(), edge_size, cudaMemcpyHostToDevice,
+                      stream_);
     }
 
     // Update params with device pointers
@@ -382,14 +382,14 @@ float TrajectoryCost::computeCostInternal(const Eigen::Ref<const output_array> s
 
   const float half_vehicle_width = params_.vehicle_width / 2.0f;
   const float left_lateral_constraint =
-      host_waypoints_->get_left_road_edge()[matched_idx] - half_vehicle_width + 0.3f;
+      host_waypoints_->get_left_road_edge()[matched_idx] - half_vehicle_width + 0.15f;
   const float right_lateral_constraint =
-      host_waypoints_->get_right_road_edge()[matched_idx] - half_vehicle_width + 0.3f;
+      host_waypoints_->get_right_road_edge()[matched_idx] - half_vehicle_width + 0.15f;
   if (matched_idx != -1) {
     if (lateral_distance > 0 && left_lateral_constraint < std::abs(lateral_distance)) {
-      violation += 1000.0f;
+      violation += 10000.0f;
     } else if (lateral_distance < 0 && right_lateral_constraint < std::abs(lateral_distance)) {
-      violation += 1000.0f;
+      violation += 10000.0f;
     }
   }
 
@@ -435,6 +435,7 @@ float TrajectoryCost::computeObstacleCost(float x, float y, float heading, int t
   float total_cost = 0.0f;
   const auto& obstacles = host_obstacles_->obstacles();
   float3 ego_pose{x, y, heading};
+  float2 ego_position{x, y};
 
   VehicleCorners vehicle_corners = computeVehicleCorners(ego_pose);
 
@@ -453,9 +454,10 @@ float TrajectoryCost::computeObstacleCost(float x, float y, float heading, int t
       obstacle_pose.z = static_cast<float>(prediction[traj_idx].yaw);
     }
 
-    bool in_capsule = cornersInCapsule(vehicle_corners, obstacle_pose, half_length, half_width);
+    bool in_capsule = (cornersInCapsule(vehicle_corners, obstacle_pose, half_length, half_width) ||
+                       pointInCapsule(obstacle_pose, half_length, half_width, ego_position));
     if (in_capsule) {
-      total_cost += 1000.0f;
+      total_cost += 10000.0f;
     }
   }
 
@@ -476,4 +478,18 @@ float TrajectoryCost::computeSafetyMargin(const Eigen::Vector2f& ego_position,
                (rotated_y * rotated_y) / (ellipse_axes.y() * ellipse_axes.y());
 
   return norm - 1.0f;
+}
+
+// GPU verification kernel implementation
+// This kernel runs sequentially to maintain cache consistency for last_matched_idx
+__global__ void verifyCostOnGPUKernel(TrajectoryCost* cost, float* states, float* costs,
+                                      float* obstacle_costs, int num_timesteps) {
+  // Only use single thread to ensure cache is maintained across timesteps
+  if (threadIdx.x == 0 && blockIdx.x == 0) {
+    for (int t = 0; t < num_timesteps; ++t) {
+      float* state = &states[t * 6];  // Each state has 6 dimensions
+      costs[t] = cost->computeStateCost(state, t, nullptr, nullptr);
+      obstacle_costs[t] = cost->computeObstacleCostDevice(state[0], state[1], state[3], t);
+    }
+  }
 }

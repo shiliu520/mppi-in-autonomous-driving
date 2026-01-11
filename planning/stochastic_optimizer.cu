@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2025-12-21 21:06:33
+ * @LastEditTime: 2026-01-11 23:04:29
  * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -10,7 +10,9 @@
 
 #include <spdlog/sinks/stdout_color_sinks.h>
 
-template<int NUM_ROLLOUTS>
+#define ENABLE_COST_VERIFICATION 0
+
+template <int NUM_ROLLOUTS>
 StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config) {
   auto planning_config = config["planning"];
   auto constraint_limits = planning_config["constraint_limits"];
@@ -84,7 +86,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   mppi_controller_->setTopNSampledControlTrajectoriesHelper(128);
 }
 
-template<int NUM_ROLLOUTS>
+template <int NUM_ROLLOUTS>
 StochasticOptimizer<NUM_ROLLOUTS>::~StochasticOptimizer() {
   delete dynamics_;
   delete trajectory_cost_;
@@ -93,7 +95,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::~StochasticOptimizer() {
   delete mppi_controller_;
 }
 
-template<int NUM_ROLLOUTS>
+template <int NUM_ROLLOUTS>
 ControlInput StochasticOptimizer<NUM_ROLLOUTS>::plan_once(
     const StateInfo& _current_state, const std::shared_ptr<ReferenceLine>& reference_line,
     const std::shared_ptr<common::ObstacleList>& obstacle_list) {
@@ -107,6 +109,9 @@ ControlInput StochasticOptimizer<NUM_ROLLOUTS>::plan_once(
   // Update obstacles in trajectory cost function
   if (obstacle_list) {
     trajectory_cost_->setObstacles(obstacle_list);
+    // Force synchronize params to GPU device
+    trajectory_cost_->paramsToDevice();
+    LOG_DEBUG(logger_, "Updated {} obstacles to GPU", obstacle_list->obstacles().size());
   }
 
   VehicleDynamics::state_array cur_state;
@@ -136,12 +141,12 @@ ControlInput StochasticOptimizer<NUM_ROLLOUTS>::plan_once(
   return {target_accel_, target_steer_};
 }
 
-template<int NUM_ROLLOUTS>
+template <int NUM_ROLLOUTS>
 Eigen::MatrixXf StochasticOptimizer<NUM_ROLLOUTS>::get_optimized_trajectory() const {
   return mppi_controller_->getTargetStateSeq();
 }
 
-template<int NUM_ROLLOUTS>
+template <int NUM_ROLLOUTS>
 planning::protos::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_result(
     const StateInfo& current_state) const {
   TicToc get_debug_result_tic;
@@ -187,6 +192,126 @@ planning::protos::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_resu
   auto sampled_costs = mppi_controller_->getSampledCostTrajectories();
   LOG_DEBUG(logger_, "StochasticOptimizer calculate sampled trajectories cost time: {:.2f} ms",
             calculate_sample_tic.toc() * 1000.0);
+
+#if ENABLE_COST_VERIFICATION
+  // Verify optimal trajectory cost by recalculating on host
+  LOG_INFO(logger_, "========== Cost Verification for Optimal Trajectory ==========");
+
+  // Log obstacle information from cost function
+  auto cost_params = trajectory_cost_->getParams();
+  std::ostringstream oss;
+  oss << "Obstacle count in cost params: " << cost_params.obstacle_list.count
+      << ", Reference line count: " << cost_params.reference_line.count
+      << ", Reference line ptr: " << (void*)cost_params.reference_line.waypoints;
+  LOG_INFO(logger_, oss.str());
+
+  Eigen::MatrixXf optimal_traj = mppi_controller_->getTargetStateSeq();
+  float total_recalculated_cost = 0.0f;
+  float total_reported_cost = mppi_controller_->getBaselineCost();
+
+  // === GPU Verification: Copy trajectory to GPU and compute cost on device ===
+  int num_steps = optimal_traj.cols();
+
+  // Allocate GPU memory for states and costs
+  float* states_gpu = nullptr;
+  float* costs_gpu = nullptr;
+  float* obstacle_costs_gpu = nullptr;
+  cudaMalloc(&states_gpu, num_steps * 6 * sizeof(float));
+  cudaMalloc(&costs_gpu, num_steps * sizeof(float));
+  cudaMalloc(&obstacle_costs_gpu, num_steps * sizeof(float));
+
+  // Copy trajectory data to GPU (transpose from column-major to row-major)
+  std::vector<float> states_host(num_steps * 6);
+  for (int t = 0; t < num_steps; ++t) {
+    for (int i = 0; i < 6; ++i) {
+      states_host[t * 6 + i] = optimal_traj(i, t);
+    }
+  }
+  cudaMemcpy(states_gpu, states_host.data(), num_steps * 6 * sizeof(float), cudaMemcpyHostToDevice);
+
+  // Initialize GPU cache: Ensure last_matched_idx is synced to GPU
+  // The updateMatchedIndex was called in plan_once, so host cache is already correct
+  // We just need to ensure it's synced to GPU before verification
+  trajectory_cost_->paramsToDevice();
+
+  auto cost_params_for_log = trajectory_cost_->getParams();
+  LOG_INFO(logger_, "GPU cache initialized with matched_idx=" +
+                        std::to_string(cost_params_for_log.reference_line.last_matched_idx));
+
+  // Launch GPU verification kernel with single thread to maintain cache consistency
+  // The last_matched_idx cache needs to be propagated across timesteps
+  verifyCostOnGPUKernel<<<1, 1>>>(trajectory_cost_->cost_d_, states_gpu, costs_gpu,
+                                  obstacle_costs_gpu, num_steps);
+  cudaDeviceSynchronize();
+
+  // Copy results back to host
+  std::vector<float> costs_from_gpu(num_steps);
+  std::vector<float> obs_costs_from_gpu(num_steps);
+  cudaMemcpy(costs_from_gpu.data(), costs_gpu, num_steps * sizeof(float), cudaMemcpyDeviceToHost);
+  cudaMemcpy(obs_costs_from_gpu.data(), obstacle_costs_gpu, num_steps * sizeof(float),
+             cudaMemcpyDeviceToHost);
+
+  float total_gpu_cost = 0.0f;
+  for (int t = 0; t < num_steps; ++t) {
+    total_gpu_cost += costs_from_gpu[t];
+  }
+
+  LOG_INFO(logger_, "GPU Cost Calculation: Total=" + std::to_string(total_gpu_cost));
+
+  // Free GPU memory
+  cudaFree(states_gpu);
+  cudaFree(costs_gpu);
+  cudaFree(obstacle_costs_gpu);
+  // === End GPU Verification ===
+
+  for (int t = 0; t < optimal_traj.cols(); ++t) {
+    VehicleDynamics::output_array state = optimal_traj.col(t);
+    float step_cost = trajectory_cost_->computeStateCost(state, t, nullptr);
+    total_recalculated_cost += step_cost;
+
+    // Log detailed cost breakdown every 10 steps or on first/last step
+    if (t == 0 || t == optimal_traj.cols() - 1 || t % 10 == 0) {
+      float obs_cost_host = trajectory_cost_->computeObstacleCost(state(0), state(1), state(3), t);
+      float step_cost_gpu = costs_from_gpu[t];
+      float obs_cost_gpu = obs_costs_from_gpu[t];
+
+      // Compute detailed cost breakdown on host
+      float x = state(0), y = state(1), vel = state(2), heading = state(3);
+      float accel = state(4), steer = state(5);
+
+      auto cost_params_host = trajectory_cost_->getParams();
+      float pos_cost = cost_params_host.position_coeff * std::abs(0.0f);  // Simplified
+      float vel_cost =
+          cost_params_host.velocity_coeff * std::abs(vel - cost_params_host.target_velocity);
+      float angle_cost = cost_params_host.angle_coeff * 0.0f;  // Simplified
+      float accel_cost = cost_params_host.accel_effort_coeff * std::abs(accel);
+      float steer_cost = cost_params_host.steer_effort_coeff * std::abs(steer);
+      float other_cost = step_cost - obs_cost_host - vel_cost - accel_cost - steer_cost;
+
+      std::ostringstream step_oss;
+      step_oss << "Step[" << t << "] pos=(" << x << "," << y << ") vel=" << vel
+               << " heading=" << heading << "\n"
+               << "  Host: total=" << step_cost << " obs=" << obs_cost_host << " vel=" << vel_cost
+               << " accel=" << accel_cost << " steer=" << steer_cost << " other=" << other_cost
+               << "\n"
+               << "  GPU:  total=" << step_cost_gpu << " obs=" << obs_cost_gpu
+               << " (diff=" << std::abs(step_cost - step_cost_gpu) << ")";
+      LOG_INFO(logger_, step_oss.str());
+    }
+  }
+
+  std::ostringstream summary_oss;
+  summary_oss << "Cost Summary:\n"
+              << "  MPPI Reported: " << total_reported_cost << "\n"
+              << "  Host Recalc:   " << total_recalculated_cost << "\n"
+              << "  GPU Recalc:    " << total_gpu_cost << "\n"
+              << "  MPPI vs Host:  " << std::abs(total_reported_cost - total_recalculated_cost)
+              << "\n"
+              << "  MPPI vs GPU:   " << std::abs(total_reported_cost - total_gpu_cost) << "\n"
+              << "  Host vs GPU:   " << std::abs(total_recalculated_cost - total_gpu_cost);
+  LOG_INFO(logger_, summary_oss.str());
+  LOG_INFO(logger_, "===============================================================");
+#endif
 
   for (const auto& traj : sampled_trajectories) {
     auto* state_seq_proto = planning_info.add_sample_xs();

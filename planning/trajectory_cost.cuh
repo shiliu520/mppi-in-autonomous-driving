@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:30:11
- * @LastEditTime: 2025-12-22 00:26:01
+ * @LastEditTime: 2026-01-11 23:01:55
  * @FilePath: /mppi-in-autonomous-driving/planning/trajectory_cost.cuh
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -30,11 +30,11 @@ struct VehicleCorners {
 };
 
 struct ReferenceLineDevice {
-  float3* waypoints;              // Device pointer to waypoints [x, y, heading]
-  float* left_road_edge_dist;     // Device pointer to left road edge distances
-  float* right_road_edge_dist;    // Device pointer to right road edge distances
-  int count;                      // Number of waypoints
-  int last_matched_idx;           // Cache for temporal continuity optimization
+  float3* waypoints;            // Device pointer to waypoints [x, y, heading]
+  float* left_road_edge_dist;   // Device pointer to left road edge distances
+  float* right_road_edge_dist;  // Device pointer to right road edge distances
+  int count;                    // Number of waypoints
+  int last_matched_idx;         // Cache for temporal continuity optimization
 };
 
 struct ObstacleDevice {
@@ -52,7 +52,7 @@ struct ObstacleDevice {
 // GPU-friendly obstacle list
 struct ObstacleListDevice {
   ObstacleDevice* obstacles;  // Device pointer to obstacle array
-  int count;               // Number of obstacles
+  int count;                  // Number of obstacles
 };
 
 struct TrajectoryCostParams : public CostParams<2> {
@@ -123,6 +123,13 @@ public:
 
   __device__ float computeControlCost(float* u, int timestep, float* theta_c, int* crash);
 
+  // Helper function to check collision with obstacles (host version)
+  float computeObstacleCost(float x, float y, float heading, int timestep) const;
+
+  // Helper function to check collision with obstacles (device version) - made public for
+  // verification
+  __device__ float computeObstacleCostDevice(float x, float y, float heading, int timestep) const;
+
 protected:
   std::shared_ptr<ReferenceLine> host_waypoints_;  // Keep host copy for updates
   float3* device_waypoints_ = nullptr;             // Device pointer for waypoints
@@ -130,8 +137,8 @@ protected:
   float* device_right_road_edge_ = nullptr;        // Device pointer for right road edge distances
   mutable int host_last_matched_idx_ = 0;          // Host-side cache for last matched index
 
-  std::shared_ptr<common::ObstacleList> host_obstacles_;    // Keep host copy for updates
-  ObstacleDevice* device_obstacles_ = nullptr;              // Device pointer for obstacle array
+  std::shared_ptr<common::ObstacleList> host_obstacles_;  // Keep host copy for updates
+  ObstacleDevice* device_obstacles_ = nullptr;            // Device pointer for obstacle array
   std::vector<float3*> device_trajectories_;  // Device pointers for each obstacle's trajectory
 
   // Helper function to compute distance to reference line (host version)
@@ -150,12 +157,6 @@ protected:
   // Common cost computation logic (device version)
   __device__ float computeCostInternalDevice(float* state, int timestep) const;
 
-  // Helper function to check collision with obstacles (host version)
-  float computeObstacleCost(float x, float y, float heading, int timestep) const;
-
-  // Helper function to check collision with obstacles (device version)
-  __device__ float computeObstacleCostDevice(float x, float y, float heading, int timestep) const;
-
   float computeSafetyMargin(const Eigen::Vector2f& ego_position,
                             const Eigen::Vector3f& obstacle_pose,
                             const Eigen::Vector2f& ellipse_axes) const;
@@ -171,6 +172,10 @@ protected:
                                             float3 capsule_pose, float half_length,
                                             float half_width) const;
 };
+
+// GPU verification kernel to compute cost for trajectory verification
+__global__ void verifyCostOnGPUKernel(TrajectoryCost* cost, float* states, float* costs,
+                                      float* obstacle_costs, int num_timesteps);
 
 #ifdef __CUDACC__
 inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
@@ -254,11 +259,11 @@ inline __device__ float TrajectoryCost::computeDistanceToReferenceLineDevice(
 
   matched_heading = params_.reference_line.waypoints[min_idx].z;
 
-  float rx  = params_.reference_line.waypoints[min_idx].x;
-  float ry  = params_.reference_line.waypoints[min_idx].y;
+  float rx = params_.reference_line.waypoints[min_idx].x;
+  float ry = params_.reference_line.waypoints[min_idx].y;
   float latral_sign =
       ((x - rx) * (-__sinf(matched_heading)) + (y - ry) * __cosf(matched_heading)) >= 0 ? 1.0f
-                                                                                      : -1.0f;
+                                                                                        : -1.0f;
   min_dist *= latral_sign;
 
   return min_dist;
@@ -289,15 +294,15 @@ inline __device__ float TrajectoryCost::computeCostInternalDevice(float* state,
       matched_idx < params_.reference_line.count) {
     const float half_vehicle_width = params_.vehicle_width / 2.0f;
     const float left_lateral_constraint =
-        params_.reference_line.left_road_edge_dist[matched_idx] - half_vehicle_width + 0.3f;
+        params_.reference_line.left_road_edge_dist[matched_idx] - half_vehicle_width + 0.15f;
     const float right_lateral_constraint =
-        params_.reference_line.right_road_edge_dist[matched_idx] - half_vehicle_width + 0.3f;
+        params_.reference_line.right_road_edge_dist[matched_idx] - half_vehicle_width + 0.15f;
 
     // lateral_distance > 0 means vehicle is on the left side of reference line
     if (lateral_distance > 0.0f && left_lateral_constraint < fabsf(lateral_distance)) {
-      violation += 1000.0f;  // Exceeds left road edge
+      violation += 10000.0f;  // Exceeds left road edge
     } else if (lateral_distance < 0.0f && right_lateral_constraint < fabsf(lateral_distance)) {
-      violation += 1000.0f;  // Exceeds right road edge
+      violation += 10000.0f;  // Exceeds right road edge
     }
   }
 
@@ -450,6 +455,7 @@ inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float
 
   float total_cost = 0.0f;
   float3 ego_pose{x, y, heading};
+  float2 ego_position{x, y};
 
   VehicleCorners vehicle_corners = computeVehicleCorners(ego_pose);
 
@@ -470,8 +476,9 @@ inline __device__ float TrajectoryCost::computeObstacleCostDevice(float x, float
     }
 
     // Check if any vehicle corner is inside the obstacle capsule
-    if (cornersInCapsule(vehicle_corners, capsule_pose, half_length, half_width)) {
-      total_cost += 1000.0f;
+    if (cornersInCapsule(vehicle_corners, capsule_pose, half_length, half_width) ||
+        pointInCapsule(capsule_pose, half_length, half_width, ego_position)) {
+      total_cost += 10000.0f;
     }
   }
 
