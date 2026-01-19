@@ -1,18 +1,18 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:59:20
- * @LastEditTime: 2025-12-04 23:48:47
+ * @LastEditTime: 2026-01-20 01:20:33
  * @FilePath: /mppi-in-autonomous-driving/planning_node.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
-#include "planning/stochastic_optimizer.cuh"
-#include "simulator/simulator.hpp"
-
-#include <getopt.h>
-#include <yaml-cpp/yaml.h>
+#include "modules/planner/stochastic_optimizer.cuh"
+#include "modules/simulator/simulator.hpp"
+#include "modules/visualizer/visualizer.hpp"
 
 #include <csignal>
+#include <getopt.h>
+#include <yaml-cpp/yaml.h>
 
 int main(int argc, char** argv) {
   int opt;
@@ -52,7 +52,13 @@ int main(int argc, char** argv) {
     }
   });
 
-  Simulator simulator(config);
+  auto visualizer = std::make_shared<Visualizer>(config);
+  Simulator simulator(config, visualizer);
+
+  if (!visualizer->start()) {
+    spdlog::info("Failed to start visualizer.");
+    return 1;
+  }
 
   auto run_simulation = [&](auto optimizer_ptr) {
     simulator.start();
@@ -65,12 +71,16 @@ int main(int argc, char** argv) {
       auto control_input = optimizer_ptr->plan_once(ego_state, reference_line, obstacle_list);
       auto planning_info = optimizer_ptr->get_debug_result(ego_state);
       simulator.set_ego_control_input(control_input);
-      simulator.update_planning_info(planning_info);
+
+      if (visualizer) {
+        visualizer->log_planning_info(planning_info);
+      }
 
       next_tick += std::chrono::milliseconds(100);
       std::this_thread::sleep_until(next_tick);
     }
     simulator.stop();
+    visualizer->stop();
   };
 
   int num_rollouts = config["planning"]["mppi_params"]["num_samples"].as<int>(8192);

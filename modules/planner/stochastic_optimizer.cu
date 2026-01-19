@@ -1,14 +1,12 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2026-01-11 23:04:29
- * @FilePath: /mppi-in-autonomous-driving/planning/stochastic_optimizer.cu
+ * @LastEditTime: 2026-01-20 01:09:20
+ * @FilePath: /mppi-in-autonomous-driving/modules/planner/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #include "stochastic_optimizer.cuh"
-
-#include <spdlog/sinks/stdout_color_sinks.h>
 
 #define ENABLE_COST_VERIFICATION 0
 
@@ -21,10 +19,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   auto vehicle_info = config["vehicle_info"];
 
   std::string planning_log_level = planning_config["log_level"].as<std::string>("info");
-  auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-  logger_ = std::make_shared<spdlog::logger>("stop_line_logger", console_sink);
-  logger_->set_level(spdlog::level::from_str(planning_log_level));
-  logger_->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
+  logger_ = create_logger("planner_logger", planning_log_level);
 
   double wheel_base = vehicle_info["wheel_base_m"].as<float>(3.0f);
   dynamics_ = new VehicleDynamics(wheel_base);

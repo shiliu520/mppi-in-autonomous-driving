@@ -37,6 +37,9 @@ simulator:
   scenario_file_path: "scenarios/ZAM_Zip-1_64_T-1_modify.xml"
   planning_problem_id: 35
   log_level: "info"
-  save_mcap: true
   problem_id: 1
   perception_range_m: 120.0
+
+visualization:
+  save_mcap: true
+  log_level: "info"

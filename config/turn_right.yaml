@@ -36,5 +36,8 @@ simulator:
   scenario_file_path: "scenarios/DEU_Schwetzingen-176_1_T-2.xml"
   planning_problem_id: 2066
   log_level: "info"
-  save_mcap: true
   perception_range_m: 120.0
+
+visualization:
+  save_mcap: true
+  log_level: "info"

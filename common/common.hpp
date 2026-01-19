@@ -11,11 +11,14 @@
 
 #include "foxglove/schemas.hpp"
 
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 #include <chrono>
 #include <cmath>
 #include <iomanip>
+#include <memory>
+#include <string>
 
 #define LOG_TRACE(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::trace, __VA_ARGS__)
 #define LOG_DEBUG(logger, ...) SPDLOG_LOGGER_CALL(logger, spdlog::level::debug, __VA_ARGS__)
@@ -26,6 +29,21 @@
 
 constexpr int kHorizonLength = 64;
 constexpr double kTimeStepSec = 0.1;
+
+/**
+ * @brief Factory function to create a logger with console color sink
+ * @param name Logger name
+ * @param level Log level (trace, debug, info, warn, error, critical)
+ * @return Shared pointer to the created logger
+ */
+inline std::shared_ptr<spdlog::logger> create_logger(const std::string& name,
+                                                     const std::string& level = "info") {
+  auto console_sink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+  auto logger = std::make_shared<spdlog::logger>(name, console_sink);
+  logger->set_level(spdlog::level::from_str(level));
+  logger->set_pattern("[%Y-%m-%d %H:%M:%S.%e] [%^\033[1m%l\033[0m%$] [%s:%#] %v");
+  return logger;
+}
 
 struct ControlInput {
   double accel{0};  // longitudinal acceleration (m/s^2)

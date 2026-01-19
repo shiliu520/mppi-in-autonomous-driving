@@ -58,15 +58,32 @@ set_target_properties(foxglove_sdk PROPERTIES
 )
 
 # Sources
-file(GLOB SIMULATOR_SOURCES CONFIGURE_DEPENDS "simulator/*.cpp")
-file(GLOB PLANNING_SOURCES CONFIGURE_DEPENDS
-    "planning/*.cpp"
-    "planning/*.cu"
+file(GLOB SIMULATOR_SOURCES CONFIGURE_DEPENDS "modules/simulator/*.cpp")
+file(GLOB PLANNER_SOURCES CONFIGURE_DEPENDS
+    "modules/planner/*.cpp"
+    "modules/planner/*.cu"
 )
+file(GLOB VISUALIZER_SOURCES CONFIGURE_DEPENDS "modules/visualizer/*.cpp")
 file(GLOB COMMON_SOURCES CONFIGURE_DEPENDS "common/*.cpp")
 
+include_directories(${EIGEN3_INCLUDE_DIR})
 include_directories(${FOXGLOVE_SOURCE_DIR}/include)
 include_directories(${PROJECT_SOURCE_DIR}/3rdparty/environment-model/include/)
+
+add_library(visualizer SHARED ${VISUALIZER_SOURCES} ${COMMON_SOURCES})
+target_compile_definitions(visualizer 
+    PUBLIC 
+        PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+)
+target_include_directories(visualizer
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}
+        ${FOXGLOVE_SOURCE_DIR}/include
+)
+target_link_libraries(visualizer
+    PUBLIC
+        EnvironmentModel::env_model
+)
 
 # Simulator library
 add_library(simulator SHARED ${SIMULATOR_SOURCES} ${COMMON_SOURCES})
@@ -77,25 +94,25 @@ target_compile_definitions(simulator
 target_include_directories(simulator
     PUBLIC
         ${PROJECT_SOURCE_DIR}
-        ${FOXGLOVE_SOURCE_DIR}/include
 )
 target_link_libraries(simulator
     PUBLIC
         EnvironmentModel::env_model
+        visualizer
 )
 
-add_library(planning SHARED ${PLANNING_SOURCES} ${COMMON_SOURCES})
-set_target_properties(planning PROPERTIES
+add_library(planner SHARED ${PLANNER_SOURCES} ${COMMON_SOURCES})
+set_target_properties(planner PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
-target_include_directories(planning
+target_include_directories(planner
     PUBLIC
         ${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}
         ${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic/include
         ${PROJECT_SOURCE_DIR}
 )
-target_link_libraries(planning
+target_link_libraries(planner
     PUBLIC
         Eigen3::Eigen
         MPPI::MPPI
@@ -113,7 +130,8 @@ target_include_directories(planning_node
 target_link_libraries(planning_node
     PRIVATE
         simulator
-        planning
+        planner
+        visualizer
         spdlog::spdlog
         yaml-cpp
         foxglove_sdk

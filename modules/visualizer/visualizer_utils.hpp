@@ -1,23 +1,24 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:04:19
- * @LastEditTime: 2025-12-13 21:46:21
- * @FilePath: /mppi-in-autonomous-driving/simulator/simulator_utils.hpp
+ * @LastEditTime: 2026-01-20 00:34:37
+ * @FilePath: /mppi-in-autonomous-driving/modules/visualizer/visualizer_utils.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
 
 #pragma once
 
-#include "commonroad_cpp/auxiliaryDefs/types_and_definitions.h"
+#include "commonroad_cpp/auxiliaryDefs/types_and_definitions.h" 
+#include "commonroad_cpp/auxiliaryDefs/structs.h"
+#include "commonroad_cpp/roadNetwork/road_network.h"
+#include "commonroad_cpp/roadNetwork/lanelet/lanelet.h"
+
 #include "foxglove/schemas.hpp"
 
 #include <cmath>
 #include <memory>
 #include <tuple>
 #include <vector>
-
-class Lanelet;
-class RoadNetwork;
 
 constexpr double kObstacleHeightVRU = 1.7;
 constexpr double kObstacleHeightVehicle = 1.6;
@@ -92,19 +93,3 @@ std::pair<bool, bool> is_lanelet_at_road_edge(const std::shared_ptr<Lanelet>& la
  */
 std::pair<bool, bool> should_draw_lanelet_borders(const std::shared_ptr<Lanelet>& lanelet,
                                                   const std::shared_ptr<RoadNetwork>& road_network);
-
-/**
- * @brief Compute distances to left and right road edges from a given position
- *
- * This function finds the lanelet containing the position and computes the distances
- * to the actual left and right road edges, considering merge/diverge scenarios.
- * Uses cross product to determine the true leftmost and rightmost lanes in merge scenarios.
- *
- * @param px X coordinate of the position
- * @param py Y coordinate of the position
- * @param road_network The road network to search in
- * @return std::pair<double, double> First: left edge distance, Second: right edge distance
- *         Returns {20.0, 20.0} if position is not in any lanelet
- */
-std::pair<double, double> compute_road_edge_distances(
-    double px, double py, const std::shared_ptr<RoadNetwork>& road_network);
