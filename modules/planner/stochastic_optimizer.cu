@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2026-01-20 01:09:20
+ * @LastEditTime: 2026-01-21 00:45:35
  * @FilePath: /mppi-in-autonomous-driving/modules/planner/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -11,7 +11,9 @@
 #define ENABLE_COST_VERIFICATION 0
 
 template <int NUM_ROLLOUTS>
-StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config) {
+StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(
+    const YAML::Node& config, std::shared_ptr<Visualizer> visualizer /* = nullptr */)
+    : visualizer_(visualizer) {
   auto planning_config = config["planning"];
   auto constraint_limits = planning_config["constraint_limits"];
   auto cost_weights = planning_config["cost_weights"];
@@ -46,7 +48,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   new_params.max_steer_angle = constraint_limits["max_steer_angle_rad"].as<float>(0.15f);
   new_params.min_steer_angle = -constraint_limits["max_steer_angle_rad"].as<float>(0.15f);
   new_params.control_cost_coeff[0] = cost_weights["jerk_effort_weight"].as<float>(20.0f);
-  new_params.control_cost_coeff[1] = cost_weights["steer_effort_weight"].as<float>(120.0f);
+  new_params.control_cost_coeff[1] = cost_weights["steer_rate_effort_weight"].as<float>(120.0f);
   new_params.longitudinal_safety_margin =
       constraint_limits["longitudinal_safety_margin_m"].as<float>(3.0f);
   new_params.lateral_safety_margin = constraint_limits["lateral_safety_margin_m"].as<float>(0.6f);
@@ -79,6 +81,7 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(const YAML::Node& config)
   // mppi_controller_->setPercentageSampledControlTrajectoriesHelper(0.004);
   // mppi_controller_->setPercentageSampledControlTrajectoriesHelper(0.0079);
   mppi_controller_->setTopNSampledControlTrajectoriesHelper(128);
+  convert_parameters_to_proto(new_params, *dynamics_, sampler_params);
 }
 
 template <int NUM_ROLLOUTS>
@@ -142,10 +145,10 @@ Eigen::MatrixXf StochasticOptimizer<NUM_ROLLOUTS>::get_optimized_trajectory() co
 }
 
 template <int NUM_ROLLOUTS>
-planning::protos::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_result(
+protos::planning::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_result(
     const StateInfo& current_state) const {
   TicToc get_debug_result_tic;
-  planning::protos::PlanningInfo planning_info;
+  protos::planning::PlanningInfo planning_info;
   planning_info.set_target_accel(target_accel_);
   planning_info.set_target_steer(target_steer_);
   planning_info.set_cruise_velocity(cruise_velocity_);
@@ -329,7 +332,57 @@ planning::protos::PlanningInfo StochasticOptimizer<NUM_ROLLOUTS>::get_debug_resu
   LOG_DEBUG(logger_, "StochasticOptimizer get_debug_result cost time: {:.2f} ms",
             get_debug_result_tic.toc() * 1000.0);
 
+  if (visualizer_) {
+    visualizer_->log_planning_info(planning_info);
+  }
+
   return planning_info;
+}
+
+template <int NUM_ROLLOUTS>
+void StochasticOptimizer<NUM_ROLLOUTS>::set_parameters_to_proto(
+    protos::config::SimulationConfig* sim_config_ptr) {
+  sim_config_ptr->mutable_vehicle_info()->CopyFrom(vehicle_info_);
+  sim_config_ptr->mutable_planning_parameters()->CopyFrom(planning_parameters_);
+}
+
+template <int NUM_ROLLOUTS>
+void StochasticOptimizer<NUM_ROLLOUTS>::convert_parameters_to_proto(
+    const TrajectoryCostParams& cost_params, const VehicleDynamics& vehicle_dynamics,
+    const SAMPLER_T::SAMPLING_PARAMS_T& sampler_params) {
+  vehicle_info_.Clear();
+  planning_parameters_.Clear();
+
+  // Vehicle Info
+  vehicle_info_.set_wheel_base_m(cost_params.wheelbase);
+  vehicle_info_.set_vehicle_width_m(cost_params.vehicle_width);
+  vehicle_info_.set_vehicle_length_m(cost_params.vehicle_length);
+  vehicle_info_.set_axle_to_front_bumper_m(cost_params.axle_to_front_bumper);
+  vehicle_info_.set_axle_to_rear_bumper_m(cost_params.axle_to_rear_bumper);
+
+  // Planning Parameters
+  planning_parameters_.set_desired_speed(cost_params.target_velocity);
+  planning_parameters_.set_mppi_lambda(mppi_controller_->getParams().lambda_);
+  planning_parameters_.set_mppi_jerk_std(sampler_params.std_dev[0]);
+  planning_parameters_.set_mppi_steer_rate_std(sampler_params.std_dev[1]);
+  planning_parameters_.set_mppi_num_samples(NUM_ROLLOUTS);
+  auto* cost_weights_ptr = planning_parameters_.mutable_cost_weight_coeff();
+  cost_weights_ptr->set_position_weight(cost_params.position_coeff);
+  cost_weights_ptr->set_velocity_weight(cost_params.velocity_coeff);
+  cost_weights_ptr->set_heading_weight(cost_params.angle_coeff);
+  cost_weights_ptr->set_accel_effort_weight(cost_params.accel_effort_coeff);
+  cost_weights_ptr->set_steer_effort_weight(cost_params.steer_effort_coeff);
+  cost_weights_ptr->set_jerk_effort_weight(cost_params.control_cost_coeff[0]);
+  cost_weights_ptr->set_steer_rate_effort_weight(cost_params.control_cost_coeff[1]);
+  auto* constraint_limits_ptr = planning_parameters_.mutable_constraint_limit();
+  constraint_limits_ptr->set_max_accel_mps2(cost_params.max_accel);
+  constraint_limits_ptr->set_min_accel_mps2(cost_params.min_accel);
+  constraint_limits_ptr->set_min_jerk_mps3(vehicle_dynamics.control_rngs_[0].x);
+  constraint_limits_ptr->set_max_jerk_mps3(vehicle_dynamics.control_rngs_[0].y);
+  constraint_limits_ptr->set_max_steer_rate_rps(vehicle_dynamics.control_rngs_[1].y);
+  constraint_limits_ptr->set_max_steer_angle_rad(cost_params.max_steer_angle);
+  constraint_limits_ptr->set_longitudinal_safety_margin_m(cost_params.longitudinal_safety_margin);
+  constraint_limits_ptr->set_lateral_safety_margin_m(cost_params.lateral_safety_margin);
 }
 
 template class StochasticOptimizer<1024>;

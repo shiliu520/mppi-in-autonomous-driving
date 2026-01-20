@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2026-01-19 00:00:00
- * @LastEditTime: 2026-01-20 01:20:03
+ * @LastEditTime: 2026-01-21 01:02:03
  * @FilePath: /mppi-in-autonomous-driving/modules/visualizer/visualizer.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -118,21 +118,34 @@ bool Visualizer::register_publish_channels() {
       make_channel(SceneUpdateChannel::create("/markers/obstacle_predictions"));
   transform_channel_ = make_channel(FrameTransformChannel::create("/transform/map_to_baselink"));
 
-  auto descriptor = planning::protos::PlanningInfo::descriptor();
-  foxglove::Schema schema;
-  schema.encoding = "protobuf";
-  schema.name = descriptor->full_name();
-  // Create a FileDescriptorSet containing our message descriptor
-  google::protobuf::FileDescriptorSet file_descriptor_set;
-  const google::protobuf::FileDescriptor* file_descriptor = descriptor->file();
-  file_descriptor->CopyTo(file_descriptor_set.add_file());
-  std::string serialized_descriptor = file_descriptor_set.SerializeAsString();
-  schema.data = reinterpret_cast<const std::byte*>(serialized_descriptor.data());
-  schema.data_len = serialized_descriptor.size();
-  planning_info_channel_ =
-      make_channel(RawChannel::create("/planning_info", "protobuf", std::move(schema)));
+  auto planning_info_descriptor = protos::planning::PlanningInfo::descriptor();
+  auto planning_info_schema =
+      build_protobuf_schema(planning_info_descriptor, planning_info_schema_buffer_);
+  planning_info_channel_ = make_channel(
+      RawChannel::create("/planning_info", "protobuf", std::move(planning_info_schema)));
+
+  auto config_descriptor = protos::config::SimulationConfig::descriptor();
+  auto config_schema = build_protobuf_schema(config_descriptor, simulation_config_schema_buffer_);
+  simulation_config_channel_ =
+      make_channel(RawChannel::create("/simulation_config", "protobuf", std::move(config_schema)));
 
   return true;
+}
+
+foxglove::Schema Visualizer::build_protobuf_schema(
+    const google::protobuf::Descriptor* message_descriptor,
+    std::vector<std::uint8_t>& schema_buffer) const {
+  foxglove::Schema schema;
+  schema.encoding = "protobuf";
+  schema.name = message_descriptor->full_name();
+  google::protobuf::FileDescriptorSet file_descriptor_set;
+  const google::protobuf::FileDescriptor* file_descriptor = message_descriptor->file();
+  file_descriptor->CopyTo(file_descriptor_set.add_file());
+  std::string serialized_descriptor = file_descriptor_set.SerializeAsString();
+  schema_buffer.assign(serialized_descriptor.begin(), serialized_descriptor.end());
+  schema.data = reinterpret_cast<const std::byte*>(schema_buffer.data());
+  schema.data_len = schema_buffer.size();
+  return schema;
 }
 
 // ============================================================================
@@ -166,7 +179,7 @@ void Visualizer::log_loop_runtime(double elapsed_seconds) {
                              elapsed_msg.size());
 }
 
-void Visualizer::log_planning_info(const planning::protos::PlanningInfo& planning_info) {
+void Visualizer::log_planning_info(const protos::planning::PlanningInfo& planning_info) {
   if (!running_) return;
   std::string debug_info_data = planning_info.SerializeAsString();
   planning_info_channel_->log(reinterpret_cast<const std::byte*>(debug_info_data.data()),
@@ -177,13 +190,13 @@ void Visualizer::log_planning_info(const planning::protos::PlanningInfo& plannin
   sampled_channel_->log(sampled_scene_update);
 }
 
-void Visualizer::log_trajectory(const planning::protos::PlanningInfo& planning_info) {
+void Visualizer::log_trajectory(const protos::planning::PlanningInfo& planning_info) {
   if (!running_) return;
   auto traj_scene_update = get_trajectory_scene_update(planning_info);
   trajectory_channel_->log(traj_scene_update);
 }
 
-void Visualizer::log_sampled_trajectories(const planning::protos::PlanningInfo& planning_info) {
+void Visualizer::log_sampled_trajectories(const protos::planning::PlanningInfo& planning_info) {
   if (!running_) return;
   auto sampled_scene_update = get_sampled_scene_update(planning_info);
   sampled_channel_->log(sampled_scene_update);
@@ -220,6 +233,13 @@ void Visualizer::log_obstacle_predictions(
   obstacle_prediction_channel_->log(prediction_scene_update);
 }
 
+void Visualizer::log_simulation_config(const protos::config::SimulationConfig& sim_config) {
+  if (!running_) return;
+  std::string config_data = sim_config.SerializeAsString();
+  simulation_config_channel_->log(reinterpret_cast<const std::byte*>(config_data.data()),
+                                  config_data.size());
+}
+
 // ============================================================================
 // Scene update generation methods
 // ============================================================================
@@ -247,7 +267,7 @@ foxglove::schemas::SceneUpdate Visualizer::get_ego_scene_update(const StateInfo&
 }
 
 foxglove::schemas::SceneUpdate Visualizer::get_trajectory_scene_update(
-    const planning::protos::PlanningInfo& planning_info) const {
+    const protos::planning::PlanningInfo& planning_info) const {
   SceneUpdate traj_scene_update;
   SceneEntity traj_entity;
   traj_entity.id = "trajectory";
@@ -270,7 +290,7 @@ foxglove::schemas::SceneUpdate Visualizer::get_trajectory_scene_update(
 }
 
 foxglove::schemas::SceneUpdate Visualizer::get_sampled_scene_update(
-    const planning::protos::PlanningInfo& planning_info) const {
+    const protos::planning::PlanningInfo& planning_info) const {
   SceneUpdate traj_scene_update;
   SceneEntity traj_entity;
   traj_entity.id = "sampled_trajectory";

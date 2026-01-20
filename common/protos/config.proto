@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package protos.config;
+
+message VehicleInfo {
+  float wheel_base_m = 1;
+  float vehicle_width_m = 2;
+  float vehicle_length_m = 3;
+  float axle_to_front_bumper_m = 4;
+  float axle_to_rear_bumper_m = 5;
+}
+
+message PlanningParameters {
+  message CostWeightCoeff {
+    float position_weight = 1;
+    float velocity_weight = 2;
+    float heading_weight = 3;
+    float accel_effort_weight = 4;
+    float steer_effort_weight = 5;
+    float jerk_effort_weight = 6;
+    float steer_rate_effort_weight = 7;
+  }
+
+  message ConstraintLimit {
+    float max_accel_mps2 = 1;
+    float min_accel_mps2 = 2;
+    float min_jerk_mps3 = 3;
+    float max_jerk_mps3 = 4;
+    float max_steer_rate_rps = 5;
+    float max_steer_angle_rad = 6;
+    float longitudinal_safety_margin_m = 7;
+    float lateral_safety_margin_m = 8;
+  }
+
+  float desired_speed = 1;
+  float mppi_lambda = 2;
+  float mppi_jerk_std = 3;
+  float mppi_steer_rate_std = 4;
+  float mppi_num_samples = 5;
+  CostWeightCoeff cost_weight_coeff = 6;
+  ConstraintLimit constraint_limit = 7;
+}
+
+message SimulationConfig {
+  VehicleInfo vehicle_info = 1;
+  PlanningParameters planning_parameters = 2;
+  string scenario_file_path = 3;
+  int32 problem_id = 4;
+}

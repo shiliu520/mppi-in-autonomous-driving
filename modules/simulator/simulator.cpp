@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:57:28
- * @LastEditTime: 2026-01-20 01:08:36
+ * @LastEditTime: 2026-01-21 00:22:14
  * @FilePath: /mppi-in-autonomous-driving/modules/simulator/simulator.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -31,6 +31,7 @@ Simulator::Simulator(const YAML::Node& config, std::shared_ptr<Visualizer> visua
   if (!scenario_file_path.empty() && scenario_file_path[0] != '/') {
     scenario_file_path = std::string(PROJECT_SOURCE_DIR) + "/" + scenario_file_path;
   }
+  scenario_file_path_ = scenario_file_path;
 
   perception_range_m_ = simulator_config["perception_range_m"].as<double>(100.0);
 
@@ -55,6 +56,7 @@ Simulator::Simulator(const YAML::Node& config, std::shared_ptr<Visualizer> visua
              "Requested planning_problem_id {} not found; using planning_problem_id {} instead.",
              planning_problem_id, selected_planning_problem->getId());
   }
+  planning_problem_id_ = static_cast<int>(selected_planning_problem->getId());
 
   const auto& initial_state = selected_planning_problem->getInitialState();
   ego_state_.x = initial_state->getXPosition();

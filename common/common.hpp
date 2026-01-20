@@ -2,7 +2,7 @@
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 23:18:52
  * @LastEditors: Please set LastEditors
- * @LastEditTime: 2025-12-09 23:06:54
+ * @LastEditTime: 2026-01-20 23:42:38
  * @FilePath: /mppi-in-autonomous-driving/common/common.hpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -10,7 +10,9 @@
 #pragma once
 
 #include "foxglove/schemas.hpp"
+#include "common/protos/config.pb.h"
 
+#include <yaml-cpp/yaml.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
@@ -140,3 +142,5 @@ std::string to_fixed(double value) {
   oss << std::fixed << std::setprecision(digits) << value;
   return oss.str();
 }
+
+protos::config::SimulationConfig LoadSimulationConfigFromYAML(const YAML::Node& config);

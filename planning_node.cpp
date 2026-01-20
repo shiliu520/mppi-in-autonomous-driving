@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-15 22:59:20
- * @LastEditTime: 2026-01-20 01:20:33
+ * @LastEditTime: 2026-01-21 00:23:28
  * @FilePath: /mppi-in-autonomous-driving/planning_node.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -61,6 +61,13 @@ int main(int argc, char** argv) {
   }
 
   auto run_simulation = [&](auto optimizer_ptr) {
+    protos::config::SimulationConfig sim_config;
+    optimizer_ptr->set_parameters_to_proto(&sim_config);
+    auto [scenario_file_path, planning_problem_id] = simulator.get_planning_problem();
+    sim_config.set_scenario_file_path(scenario_file_path);
+    sim_config.set_problem_id(planning_problem_id);
+    visualizer->log_simulation_config(sim_config);
+
     simulator.start();
     const auto main_thread_start = std::chrono::steady_clock::now();
     auto next_tick = main_thread_start;
@@ -69,12 +76,8 @@ int main(int argc, char** argv) {
       auto reference_line = simulator.get_reference_line();
       auto obstacle_list = simulator.get_obstacle_list();
       auto control_input = optimizer_ptr->plan_once(ego_state, reference_line, obstacle_list);
-      auto planning_info = optimizer_ptr->get_debug_result(ego_state);
+      optimizer_ptr->get_debug_result(ego_state);
       simulator.set_ego_control_input(control_input);
-
-      if (visualizer) {
-        visualizer->log_planning_info(planning_info);
-      }
 
       next_tick += std::chrono::milliseconds(100);
       std::this_thread::sleep_until(next_tick);
@@ -86,27 +89,27 @@ int main(int argc, char** argv) {
   int num_rollouts = config["planning"]["mppi_params"]["num_samples"].as<int>(8192);
   switch (num_rollouts) {
     case 1024: {
-      auto optimizer = std::make_unique<StochasticOptimizer<1024>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<1024>>(config, visualizer);
       run_simulation(std::move(optimizer));
       break;
     }
     case 2048: {
-      auto optimizer = std::make_unique<StochasticOptimizer<2048>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<2048>>(config, visualizer);
       run_simulation(std::move(optimizer));
       break;
     }
     case 4096: {
-      auto optimizer = std::make_unique<StochasticOptimizer<4096>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<4096>>(config, visualizer);
       run_simulation(std::move(optimizer));
       break;
     }
     case 8192: {
-      auto optimizer = std::make_unique<StochasticOptimizer<8192>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<8192>>(config, visualizer);
       run_simulation(std::move(optimizer));
       break;
     }
     case 16384: {
-      auto optimizer = std::make_unique<StochasticOptimizer<16384>>(config);
+      auto optimizer = std::make_unique<StochasticOptimizer<16384>>(config, visualizer);
       run_simulation(std::move(optimizer));
       break;
     }

@@ -27,11 +27,16 @@ set(MPPI_USE_CUDA_BARRIERS OFF CACHE BOOL "Disable CUDA barriers for older GPUs"
 add_subdirectory(${PROJECT_SOURCE_DIR}/3rdparty/MPPI-Generic)
 
 # Protobuf: generate sources
-set(PROTO_FILES "${PROJECT_SOURCE_DIR}/common/protos/planning_info.proto")
+# set(PROTO_FILES "${PROJECT_SOURCE_DIR}/common/protos/planning_info.proto")
+file(GLOB PROTO_FILES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/common/protos/*.proto")
 set(PROTO_OUTPUT_DIR "${PROJECT_SOURCE_DIR}/common/protos")
-get_filename_component(PROTO_FILE_WE ${PROTO_FILES} NAME_WE)
-set(PROTO_SRCS "${PROTO_OUTPUT_DIR}/${PROTO_FILE_WE}.pb.cc")
-set(PROTO_HDRS "${PROTO_OUTPUT_DIR}/${PROTO_FILE_WE}.pb.h")
+set(PROTO_SRCS "")
+set(PROTO_HDRS "")
+foreach(PROTO_FILE IN LISTS PROTO_FILES)
+    get_filename_component(PROTO_FILE_WE ${PROTO_FILE} NAME_WE)
+    list(APPEND PROTO_SRCS "${PROTO_OUTPUT_DIR}/${PROTO_FILE_WE}.pb.cc")
+    list(APPEND PROTO_HDRS "${PROTO_OUTPUT_DIR}/${PROTO_FILE_WE}.pb.h")
+endforeach()
 add_custom_command(
     OUTPUT ${PROTO_SRCS} ${PROTO_HDRS}
     COMMAND ${Protobuf_PROTOC_EXECUTABLE}
@@ -116,6 +121,7 @@ target_link_libraries(planner
     PUBLIC
         Eigen3::Eigen
         MPPI::MPPI
+        EnvironmentModel::env_model
 )
 
 # Executable

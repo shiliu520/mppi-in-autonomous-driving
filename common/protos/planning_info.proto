@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package planning.protos;
+package protos.planning;
 
 message TrajectoryPoint {
   float pos_x = 1;
