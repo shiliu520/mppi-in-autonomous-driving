@@ -1737,7 +1737,7 @@
       <isLeftOf ref="15552"/>
     </incoming>
   </intersection>
-  <dynamicObstacle id="20012">
+  <dynamicObstacle id="2012">
     <type>car</type>
     <shape>
       <rectangle>
@@ -4174,7 +4174,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20014">
+  <dynamicObstacle id="2014">
     <type>car</type>
     <shape>
       <rectangle>
@@ -7391,7 +7391,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20015">
+  <dynamicObstacle id="2015">
     <type>car</type>
     <shape>
       <rectangle>
@@ -9108,7 +9108,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20016">
+  <dynamicObstacle id="2016">
     <type>car</type>
     <shape>
       <rectangle>
@@ -12525,7 +12525,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20018">
+  <dynamicObstacle id="2018">
     <type>car</type>
     <shape>
       <rectangle>
@@ -14582,7 +14582,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20019">
+  <dynamicObstacle id="2019">
     <type>car</type>
     <shape>
       <rectangle>
@@ -15119,7 +15119,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20020">
+  <dynamicObstacle id="2020">
     <type>car</type>
     <shape>
       <rectangle>
@@ -19156,7 +19156,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20022">
+  <dynamicObstacle id="2022">
     <type>car</type>
     <shape>
       <rectangle>
@@ -23193,7 +23193,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20023">
+  <dynamicObstacle id="2023">
     <type>car</type>
     <shape>
       <rectangle>
@@ -23330,7 +23330,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20024">
+  <dynamicObstacle id="2024">
     <type>car</type>
     <shape>
       <rectangle>
@@ -27367,7 +27367,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20025">
+  <dynamicObstacle id="2025">
     <type>car</type>
     <shape>
       <rectangle>
@@ -27744,7 +27744,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20026">
+  <dynamicObstacle id="2026">
     <type>car</type>
     <shape>
       <rectangle>
@@ -28521,7 +28521,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20027">
+  <dynamicObstacle id="2027">
     <type>car</type>
     <shape>
       <rectangle>
@@ -32558,7 +32558,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20028">
+  <dynamicObstacle id="2028">
     <type>car</type>
     <shape>
       <rectangle>
@@ -36595,7 +36595,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20029">
+  <dynamicObstacle id="2029">
     <type>car</type>
     <shape>
       <rectangle>
@@ -40632,7 +40632,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20030">
+  <dynamicObstacle id="2030">
     <type>car</type>
     <shape>
       <rectangle>
@@ -43029,7 +43029,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <dynamicObstacle id="20031">
+  <dynamicObstacle id="2031">
     <type>car</type>
     <shape>
       <rectangle>
@@ -47066,7 +47066,7 @@
       </state>
     </trajectory>
   </dynamicObstacle>
-  <planningProblem id="20021">
+  <planningProblem id="2021">
     <initialState>
       <time>
         <exact>0</exact>

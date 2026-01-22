@@ -125,7 +125,7 @@ target_link_libraries(planner
 )
 
 # Executable
-add_executable(planning_node planning_node.cpp ${PROTO_SRCS})
+add_executable(planning_node modules/planning_node.cpp ${PROTO_SRCS})
 add_dependencies(planning_node generate_proto)
 target_sources(planning_node PRIVATE ${FOXGLOVE_SOURCES})
 target_include_directories(planning_node
