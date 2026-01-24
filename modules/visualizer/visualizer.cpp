@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2026-01-19 00:00:00
- * @LastEditTime: 2026-01-21 01:02:03
+ * @LastEditTime: 2026-01-23 23:26:14
  * @FilePath: /mppi-in-autonomous-driving/modules/visualizer/visualizer.cpp
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -417,7 +417,7 @@ foxglove::schemas::SceneUpdate Visualizer::get_lanelets_scene_update(
       left_border_line.scale_invariant = false;
       left_border_line.color = lane_color;
       if (is_left_edge) {
-        left_border_line.thickness = 0.25;
+        left_border_line.thickness = 0.21;
         left_border_line.color = road_edge_color;
       }
       std::vector<double> left_xs, left_ys;
@@ -446,7 +446,7 @@ foxglove::schemas::SceneUpdate Visualizer::get_lanelets_scene_update(
       right_border_line.scale_invariant = false;
       right_border_line.color = lane_color;
       if (is_right_edge) {
-        right_border_line.thickness = 0.25;
+        right_border_line.thickness = 0.21;
         right_border_line.color = road_edge_color;
       }
       std::vector<double> right_xs, right_ys;

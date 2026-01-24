@@ -1,7 +1,7 @@
 /*
  * @Author: puyu yu.pu@qq.com
  * @Date: 2025-11-17 23:39:47
- * @LastEditTime: 2026-01-21 00:45:35
+ * @LastEditTime: 2026-01-24 22:49:04
  * @FilePath: /mppi-in-autonomous-driving/modules/planner/stochastic_optimizer.cu
  * Copyright (c) 2025 by puyu, All Rights Reserved.
  */
@@ -18,7 +18,13 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(
   auto constraint_limits = planning_config["constraint_limits"];
   auto cost_weights = planning_config["cost_weights"];
   auto mppi_config = planning_config["mppi_params"];
+  auto visualization_config = config["visualization"];
   auto vehicle_info = config["vehicle_info"];
+
+  int visualize_sampled_num =
+      visualization_config["sampled_trajectories_visualize_num"].as<int>(128);
+  std::string visualize_sampled_method =
+      visualization_config["sampled_trajectories_visualize_method"].as<std::string>("top_k");
 
   std::string planning_log_level = planning_config["log_level"].as<std::string>("info");
   logger_ = create_logger("planner_logger", planning_log_level);
@@ -27,8 +33,8 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(
   dynamics_ = new VehicleDynamics(wheel_base);
   dynamics_->control_rngs_[0].x = constraint_limits["min_jerk_mps3"].as<float>(-1.5);
   dynamics_->control_rngs_[0].y = constraint_limits["max_jerk_mps3"].as<float>(1.5);
-  dynamics_->control_rngs_[1].x = -constraint_limits["max_steering_rate_rps"].as<float>(0.07);
-  dynamics_->control_rngs_[1].y = constraint_limits["max_steering_rate_rps"].as<float>(0.07);
+  dynamics_->control_rngs_[1].x = -constraint_limits["max_steer_rate_rps"].as<float>(0.07);
+  dynamics_->control_rngs_[1].y = constraint_limits["max_steer_rate_rps"].as<float>(0.07);
 
   cruise_velocity_ = planning_config["desired_speed"].as<float>(16.0f);
   trajectory_cost_ = new TrajectoryCost;
@@ -78,9 +84,13 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(
   controller_params.dynamics_rollout_dim_ = dim3(64, 1, 1);
   controller_params.cost_rollout_dim_ = dim3(64, 1, 1);
   mppi_controller_->setParams(controller_params);
-  // mppi_controller_->setPercentageSampledControlTrajectoriesHelper(0.004);
-  // mppi_controller_->setPercentageSampledControlTrajectoriesHelper(0.0079);
-  mppi_controller_->setTopNSampledControlTrajectoriesHelper(128);
+
+  if (visualize_sampled_method == "top_k") {
+    mppi_controller_->setTopNSampledControlTrajectoriesHelper(visualize_sampled_num);
+  } else {
+    mppi_controller_->setPercentageSampledControlTrajectoriesHelper(
+        static_cast<float>(visualize_sampled_num) / NUM_ROLLOUTS);
+  }
   convert_parameters_to_proto(new_params, *dynamics_, sampler_params);
 }
 

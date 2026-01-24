@@ -9,7 +9,7 @@ planning:
   desired_speed: 13.88  # 50 km/h
   log_level: "info"     # options: trace, debug, info, warn, err, critical, off
   mppi_params:
-    lambda: 15.0
+    lambda: 18.0
     noise_sigma:
       jerk_std: 0.5
       steer_rate_std: 0.05
@@ -21,7 +21,7 @@ planning:
     accel_effort_weight: 10.0
     steer_effort_weight: 80.0
     jerk_effort_weight: 20.0
-    steer_rate_effort_weight: 120.0
+    steer_rate_effort_weight: 100.0
   constraint_limits:
     max_accel_mps2: 2.0
     min_accel_mps2: -4.0
@@ -33,8 +33,8 @@ planning:
     lateral_safety_margin_m: 0.6
 
 simulator:
-  # scenario_file_path: "scenarios/DEU_Salzwedel-107_1_T-7.xml"
-  scenario_file_path: "scenarios/POL_Poznan-81_1_T-1.xml"
+  scenario_file_path: "scenarios/DEU_Salzwedel-107_1_T-7.xml"
+  # scenario_file_path: "scenarios/POL_Poznan-81_1_T-1.xml"
   # scenario_file_path: "scenarios/DEU_Schwetzingen-12_1_T-2.xml"
   planning_problem_id: 20016
   log_level: "info"
@@ -43,3 +43,5 @@ simulator:
 visualization:
   save_mcap: true
   log_level: "info"
+  sampled_trajectories_visualize_num: 256
+  sampled_trajectories_visualize_method: "top_k"  # options: "random", "top_k"
