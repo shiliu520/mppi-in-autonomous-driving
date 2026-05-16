@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-set(CMAKE_CUDA_ARCHITECTURES 75)
+set(CMAKE_CUDA_ARCHITECTURES 89)
 # Suppress CUDA warnings from Eigen library interactions
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcudafe=--diag_suppress=20014>)
@@ -18,7 +18,7 @@ message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 option(ENABLE_WARNINGS "Enable strict compiler warnings" OFF)
 
 # Dependencies
-find_package(spdlog REQUIRED)
+# find_package(spdlog REQUIRED)
 find_package(yaml-cpp REQUIRED)
 find_package(Threads REQUIRED)
 find_package(Eigen3 REQUIRED)

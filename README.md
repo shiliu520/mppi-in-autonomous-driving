@@ -16,6 +16,10 @@ Real-time probabilistic inference-based motion planning for autonomous driving w
 - **yaml-cpp** - YAML parser and emitter
 - **Protobuf** - Protocol buffers for data serialization
 
+```bash
+sudo apt install -y libeigen3-dev  libspdlog-dev libyaml-cpp-dev protobuf-compiler libprotobuf-dev
+```
+
 Tested on WSL2 Ubuntu 22.04🐧
 
 
@@ -34,6 +38,12 @@ cd mppi-in-autonomous-driving
 
 ```bash
 cmake -S . -B build
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.6/bin/nvcc \
+  -DFETCHCONTENT_SOURCE_DIR_COMMONROAD_CMAKE=/home/shiliu/opensource/commonroad-cmake
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.6/bin/nvcc \
+  -DFETCHCONTENT_SOURCE_DIR_COMMONROAD_CMAKE=/home/shiliu/opensource/commonroad-cmake
 cmake --build build -j$(nproc)
 ```
 
@@ -42,7 +52,11 @@ cmake --build build -j$(nproc)
 After compilation, the executable file `planning_node` will be generated in the build folder. Specify a parameter configuration file for it to start the program.
 
 ```bash
-./build/planning_node --config ./config/default.yaml
+./build/planning_node -c ./config/default.yaml
+./build/planning_node -c ./config/lane_change.yaml
+./build/planning_node -c ./config/turn_left.yaml
+./build/planning_node -c ./config/turn_right.yaml
+./build/planning_node -c ./config/two-into-one-merge.yaml
 ```
 
 

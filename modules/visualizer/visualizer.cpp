@@ -279,8 +279,8 @@ foxglove::schemas::SceneUpdate Visualizer::get_trajectory_scene_update(
   std::vector<Point3> traj_points;
   const auto& optimal_trajectory = planning_info.optimal_trajectory();
   for (int idx = 2; idx < planning_info.optimal_trajectory_size(); ++idx) {
-    const float x = optimal_trajectory.at(idx).pos_x();
-    const float y = optimal_trajectory.at(idx).pos_y();
+    const float x = optimal_trajectory.Get(idx).pos_x();
+    const float y = optimal_trajectory.Get(idx).pos_y();
     Point3 point{x, y, 0.0};
     traj_points.emplace_back(point);
   }
@@ -309,10 +309,10 @@ foxglove::schemas::SceneUpdate Visualizer::get_sampled_scene_update(
     sampled_line.thickness = 0.2;
     sampled_line.scale_invariant = false;
     sampled_line.color = traj_color;
-    const auto& trajectory = sampled_trajectory.at(seq_idx).trajectory();
+    const auto& trajectory = sampled_trajectory.Get(seq_idx).trajectory();
     for (int idx = 0; idx < trajectory.size(); ++idx) {
-      const float x = trajectory.at(idx).pos_x();
-      const float y = trajectory.at(idx).pos_y();
+      const float x = trajectory.Get(idx).pos_x();
+      const float y = trajectory.Get(idx).pos_y();
       Point3 point{x, y, 0.0};
       sampled_line.points.emplace_back(point);
     }
