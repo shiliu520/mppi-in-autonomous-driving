@@ -30,29 +30,29 @@ struct VehicleCorners {
 };
 
 struct ReferenceLineDevice {
-  float3* waypoints;            // Device pointer to waypoints [x, y, heading]
-  float* left_road_edge_dist;   // Device pointer to left road edge distances
-  float* right_road_edge_dist;  // Device pointer to right road edge distances
-  int count;                    // Number of waypoints
-  int last_matched_idx;         // Cache for temporal continuity optimization
+  float3* waypoints = nullptr;            // Device pointer to waypoints [x, y, heading]
+  float* left_road_edge_dist = nullptr;   // Device pointer to left road edge distances
+  float* right_road_edge_dist = nullptr;  // Device pointer to right road edge distances
+  int count = 0;                          // Number of waypoints
+  int last_matched_idx = 0;               // Cache for temporal continuity optimization
 };
 
 struct ObstacleDevice {
-  float x, y;           // Center position
-  float width, length;  // Dimensions
-  float heading;        // Orientation in radians
-  int type;             // ObstacleType as float for GPU compatibility
-  bool is_static;       // true for static, false for dynamic
+  float x = 0.0f, y = 0.0f;  // Center position
+  float width = 0.0f, length = 0.0f;  // Dimensions
+  float heading = 0.0f;      // Orientation in radians
+  int type = 0;              // ObstacleType as float for GPU compatibility
+  bool is_static = false;    // true for static, false for dynamic
 
-  float3* future_traj;  // Device pointer to predicted trajectory [x, y, heading]
-  int traj_len;         // Number of future trajectory points
-  int reserved;         // Padding for alignment
+  float3* future_traj = nullptr;  // Device pointer to predicted trajectory [x, y, heading]
+  int traj_len = 0;               // Number of future trajectory points
+  int reserved = 0;               // Padding for alignment
 };
 
 // GPU-friendly obstacle list
 struct ObstacleListDevice {
-  ObstacleDevice* obstacles;  // Device pointer to obstacle array
-  int count;                  // Number of obstacles
+  ObstacleDevice* obstacles = nullptr;  // Device pointer to obstacle array
+  int count = 0;                        // Number of obstacles
 };
 
 struct TrajectoryCostParams : public CostParams<2> {
