@@ -96,11 +96,13 @@ StochasticOptimizer<NUM_ROLLOUTS>::StochasticOptimizer(
 
 template <int NUM_ROLLOUTS>
 StochasticOptimizer<NUM_ROLLOUTS>::~StochasticOptimizer() {
+  // 必须先删 controller：它的析构会调用 model_/cost_/fb_controller_/sampler_ 的 freeCudaMem()，
+  // 此时这些对象必须仍然存活。若先删下面几个对象再删 controller，会 use-after-free。
+  delete mppi_controller_;
   delete dynamics_;
   delete trajectory_cost_;
   delete sampler_;
   delete ddp_feedback_;
-  delete mppi_controller_;
 }
 
 template <int NUM_ROLLOUTS>

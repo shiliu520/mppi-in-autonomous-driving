@@ -43,13 +43,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  std::atomic_bool done = false;
-  static std::function<void()> sigint_handler = [&] { done = true; };
+  static std::atomic_bool done = false;
   std::signal(SIGINT, [](int) {
-    if (sigint_handler) {
-      sigint_handler();
-      spdlog::info("SIGINT received, shutting down...");
-    }
+    // 异步信号安全：信号处理器内只做无锁原子置位，不做 I/O / 加锁 / 内存分配。
+    done.store(true, std::memory_order_relaxed);
   });
 
   auto visualizer = std::make_shared<Visualizer>(config);
@@ -82,6 +79,7 @@ int main(int argc, char** argv) {
       next_tick += std::chrono::milliseconds(100);
       std::this_thread::sleep_until(next_tick);
     }
+    spdlog::info("SIGINT received, shutting down...");
     simulator.stop();
     visualizer->stop();
   };
